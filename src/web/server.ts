@@ -10,7 +10,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { extname, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { startGateway, type GatewayMode } from "../gatewayMode.js";
-import { model } from "../muse.js";
+import { model, endpoint, openAvailable } from "../muse.js";
 import { SUPPORTED_EXTENSIONS, type InvoiceSource } from "../invoice.js";
 import { runAgent, today, type RunEvent } from "../runner.js";
 import { transcribe, VOICE_MODEL } from "../voice.js";
@@ -65,7 +65,10 @@ export class WebApp {
       return;
     }
     if (req.method === "GET" && path === "/api/config") {
-      return json(res, 200, { mode: this.gateway.mode, model: model(), voiceModel: VOICE_MODEL, today: today(), gateway: this.gateway.url, dryRun: true });
+      return json(res, 200, {
+        mode: this.gateway.mode, model: model(), voiceModel: VOICE_MODEL, today: today(), gateway: this.gateway.url, dryRun: true,
+        openAvailable: openAvailable(), openModel: endpoint("muse-spark-open").model,
+      });
     }
     if (req.method === "GET" && path === "/api/samples") return json(res, 200, { samples: await sampleNames() });
     const sample = path.match(/^\/api\/samples\/([A-Za-z0-9._-]+)$/);
@@ -96,7 +99,7 @@ export class WebApp {
     if (origin && origin !== `http://${req.headers.host}`) return json(res, 403, { error: "cross-origin request refused" });
     const raw = await readBody(req, MAX_BODY_BYTES);
     if (raw === null) return json(res, 413, { error: "upload too large" });
-    let body: { goal?: unknown; files?: unknown; samples?: unknown; attackDemo?: unknown };
+    let body: { goal?: unknown; files?: unknown; samples?: unknown; attackDemo?: unknown; brain?: unknown };
     try {
       body = JSON.parse(raw);
     } catch {
@@ -106,11 +109,13 @@ export class WebApp {
     if ("error" in sources) return json(res, 400, { error: sources.error });
     const goal = typeof body.goal === "string" && body.goal.trim() ? body.goal.trim().slice(0, 500) : "Pay these invoices.";
 
+    if (body.brain === "muse-spark-open" && !openAvailable()) return json(res, 400, { error: "Muse Spark Open needs BASETEN_API_KEY in .env" });
     const run: Run = { id: randomUUID(), events: [], listeners: new Set(), finished: false, created: Date.now() };
     this.runs.set(run.id, run);
     this.prune();
     const agentMode = body.attackDemo === true ? "attack-demo" : "guarded";
-    runAgent({ goal, sources: sources.list, agentMode }, this.gateway, (e) => this.publish(run, e)).finally(() => {
+    const brain = body.brain === "muse-spark-open" ? "muse-spark-open" : "muse-spark";
+    runAgent({ goal, sources: sources.list, agentMode, brain }, this.gateway, (e) => this.publish(run, e)).finally(() => {
       run.finished = true;
       for (const l of run.listeners) l.end();
       run.listeners.clear();

@@ -8,7 +8,7 @@
 // "pay this week's invoices" selects some invoices); a payment that matches no invoice
 // never widens them. A tricked agent can propose anything; it cannot change what is approved.
 
-import { chat, model, type Message, type Tool } from "./muse.js";
+import { chat, endpoint, type Brain, type Message, type Tool } from "./muse.js";
 import { checkPayment, requestMission, waitForApproval, DRY_RUN_OUTCOME, type Decision, type PaymentProposal } from "./yebo.js";
 import { extractInvoiceSource, type Invoice, type InvoiceSource } from "./invoice.js";
 import { findHiddenRequests, type HiddenRequest } from "./injection.js";
@@ -37,7 +37,8 @@ export type DecisionResult = {
 };
 
 export type RunEvent =
-  | { type: "started"; mode: GatewayMode["mode"]; agentMode: AgentMode; model: string; goal: string; invoices: number; today: string }
+  // model: what plans the payments; readerModel: what reads the invoices
+  | { type: "started"; mode: GatewayMode["mode"]; agentMode: AgentMode; brain: Brain; model: string; brainLabel: string; readerModel: string; goal: string; invoices: number; today: string }
   | { type: "invoice"; invoice: Invoice }
   | { type: "invoice_error"; file: string; error: string }
   | { type: "planning" }
@@ -188,14 +189,19 @@ async function approveMission(goal: string, limits: MissionLimits, source: "invo
   return token ?? "";
 }
 
-export type RunInput = { goal: string; sources: InvoiceSource[]; agentMode?: AgentMode };
+export type RunInput = { goal: string; sources: InvoiceSource[]; agentMode?: AgentMode; brain?: Brain };
 
 export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit): Promise<DecisionResult[]> {
   const results: DecisionResult[] = [];
   const agentMode: AgentMode = input.agentMode ?? "guarded";
   try {
     const date = today();
-    emit({ type: "started", mode: gateway.mode, agentMode, model: model(), goal: input.goal, invoices: input.sources.length, today: date });
+    const brain: Brain = input.brain ?? "muse-spark";
+    const ep = endpoint(brain);
+    emit({
+      type: "started", mode: gateway.mode, agentMode, brain, model: ep.model, brainLabel: ep.label,
+      readerModel: endpoint("muse-spark").model, goal: input.goal, invoices: input.sources.length, today: date,
+    });
     const invoices = await readInvoices(input.sources, emit);
     if (input.sources.length && !invoices.length) throw new Error("none of the invoices could be read");
     const dated = `${input.goal}\n\nToday is ${weekday(date)}, ${date}.`;
@@ -216,8 +222,9 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
 
     for (let step = 0; step < MAX_STEPS; step++) {
       emit({ type: "planning" });
-      const reply = await chat(messages, tools);
-      messages.push(reply);
+      const reply = await chat(messages, tools, brain);
+      // Only the standard fields go back into the conversation (providers differ in extras).
+      messages.push({ role: "assistant", content: reply.content ?? null, ...(reply.tool_calls?.length ? { tool_calls: reply.tool_calls } : {}) });
 
       if (!reply.tool_calls?.length) {
         if (typeof reply.content === "string" && reply.content.trim()) emit({ type: "agent_message", text: reply.content.trim() });

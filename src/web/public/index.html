@@ -34,6 +34,11 @@
         </label>
         <ul class="chips" id="chips"></ul>
         <button type="button" class="link" id="use-samples">Use the 4 sample invoices</button>
+        <fieldset class="brain">
+          <legend>Agent brain</legend>
+          <label><input type="radio" name="brain" value="muse-spark" checked> <span><strong>Muse Spark</strong> <small id="brain-spark">Meta Model API</small></span></label>
+          <label id="brain-open-label"><input type="radio" name="brain" value="muse-spark-open" id="brain-open"> <span><strong>Muse Spark Open</strong> <small id="brain-open-note">open weights, via Baseten</small></span></label>
+        </fieldset>
         <label class="toggle">
           <input type="checkbox" id="attack-demo">
           <span><strong>Attack demo</strong> · simulate a hijacked agent: payment requests hidden in the invoices are forced through. Yebo should refuse them.</span>

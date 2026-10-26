@@ -5,6 +5,7 @@
 //   npm run dev -- "Pay the design contractor $400 for the October logo work"
 //   npm run dev -- demo/invoices --attack-demo      hidden payment requests are forced through
 //                                                   (a hijacked agent); Yebo still stops them
+//   npm run dev -- demo/invoices --open             plan with Muse Spark Open (open weights, Baseten)
 //   npm run dev -- demo/invoices --voice demo/voice/pay-this-weeks-invoices.wav
 //                                                   the spoken instruction, via Muse Voice Transcribe
 import "dotenv/config";
@@ -16,6 +17,7 @@ import { startGateway, modeBanner } from "./gatewayMode.js";
 import { transcribe, VOICE_MODEL } from "./voice.js";
 import { readFile } from "node:fs/promises";
 import { runAgent, type AgentMode, type RunEvent } from "./runner.js";
+import type { Brain } from "./muse.js";
 
 function print(e: RunEvent, mode: "live" | "judge") {
   switch (e.type) {
@@ -25,7 +27,8 @@ function print(e: RunEvent, mode: "live" | "judge") {
         console.log("hidden in the invoices are forced through after the agent's own. Watch what Yebo does.");
       }
       console.log(`Instruction: "${e.goal}" (today is ${e.today})`);
-      if (e.invoices) console.log(`\nReading ${e.invoices} invoice${e.invoices === 1 ? "" : "s"} with ${e.model}...`);
+      console.log(`Agent brain: ${e.brainLabel}, ${e.model}`);
+      if (e.invoices) console.log(`\nReading ${e.invoices} invoice${e.invoices === 1 ? "" : "s"} with ${e.readerModel}...`);
       break;
     case "invoice": {
       const v = e.invoice;
@@ -84,13 +87,18 @@ function print(e: RunEvent, mode: "live" | "judge") {
 }
 
 // Splits the command line into invoice files (files, or folders of them) and the goal text.
-async function parseArgs(args: string[]): Promise<{ goal: string; files: string[]; agentMode: AgentMode; voice: string | null }> {
+async function parseArgs(args: string[]): Promise<{ goal: string; files: string[]; agentMode: AgentMode; voice: string | null; brain: Brain }> {
   const files: string[] = [];
   const words: string[] = [];
   let agentMode: AgentMode = "guarded";
   let voice: string | null = null;
+  let brain: Brain = "muse-spark";
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
+    if (arg === "--open") {
+      brain = "muse-spark-open";
+      continue;
+    }
     if (arg === "--attack-demo") {
       agentMode = "attack-demo";
       continue;
@@ -109,12 +117,12 @@ async function parseArgs(args: string[]): Promise<{ goal: string; files: string[
     else words.push(arg);
   }
   const goal = words.join(" ") || (files.length ? "Pay these invoices." : "Pay the design contractor $400 for the October logo work");
-  return { goal, files, agentMode, voice };
+  return { goal, files, agentMode, voice, brain };
 }
 
 async function main() {
   const args = await parseArgs(process.argv.slice(2));
-  const { files, agentMode } = args;
+  const { files, agentMode, brain } = args;
   let goal = args.goal;
   if (args.voice) {
     console.log(`Transcribing ${args.voice} with ${VOICE_MODEL}...`);
@@ -125,7 +133,7 @@ async function main() {
   const gateway = await startGateway();
   console.log(modeBanner(gateway));
   try {
-    await runAgent({ goal, sources, agentMode }, gateway, (e) => print(e, gateway.mode));
+    await runAgent({ goal, sources, agentMode, brain }, gateway, (e) => print(e, gateway.mode));
   } finally {
     await gateway.stop();
   }

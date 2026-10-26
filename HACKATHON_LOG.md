@@ -86,3 +86,13 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - `src/runner.ts`: the agent is told today's date (pin it with `YEBO_TODAY`), and the limits now cover only the invoices the agent chose to pay, still built from the invoices themselves, so "pay this week's invoices" narrows the mission and nothing can widen it.
 - Tests: 33 in total (WAV checks, the documented multipart request, transcript cleanup, the transcribe endpoint, and "this week" narrowing the mission).
 - Checked live: CLI and web app (in Chrome, via the sample voice command through the browser's WAV encoder) with real Muse Voice Transcribe and `muse-spark-1.3`, today pinned to Mon 2026-11-02: heard "Pay this week's invoices", proposed Brightleaf, Copperline and Ridgeback (due Nov 5 to 7), limits 3 payees and $1,890, three ALLOW with receipts.
+
+## 2026-10-26 (Phase 5: Muse Spark Open via Baseten)
+
+- Checked the docs before building (dev.meta.ai/docs/muse-spark-open, /deploy, /settings; baseten.co/library/muse-spark-open; docs.baseten.co Model APIs): Muse Spark Open is the open-weight release of Muse Spark (816B total, 42B active). Baseten serves it OpenAI-compatible at `https://inference.baseten.co/v1` with `Authorization: Bearer`, model `meta-models/muse-spark-open`. Tool calling is supported; structured output and JSON mode are not ("All except Muse Spark Open support structured outputs"). Recommended settings: temperature 1.0, top_p 1.0; reasoning effort defaults to `xhigh`. No page mentions a `-1026` suffix, so the default is the documented name and `MUSE_SPARK_OPEN_MODEL` can change it.
+- `src/muse.ts`: the agent brain can be `muse-spark` (Meta Model API, default) or `muse-spark-open` (Baseten, `BASETEN_API_KEY`), with the recommended settings and `reasoning_effort: medium`; if the provider rejects that parameter the request is retried once without it.
+- `src/runner.ts`: the brain plans and makes the tool calls; invoice reading and the hidden-request audit stay on `muse-spark-1.3` because they need strict JSON schemas. Only standard message fields are sent back to the model.
+- CLI `--open`; web app "Agent brain" choice (Muse Spark Open is greyed out until `BASETEN_API_KEY` is set).
+- `src/checkOpen.ts`: `npm run check-open` checks the Baseten key (never printed), lists the Muse models the account can use, and runs a test message and a test tool call, with plain-English fixes.
+- Tests: 40 in total (Baseten URL, key, model and settings; the Meta API stays the default and does all structured output; model and effort overrides; the reasoning_effort retry; error messages; the web app refuses Open without a key and, with one, plans on Baseten while reading on Meta).
+- Not yet run live: no Baseten key on this machine yet.

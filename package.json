@@ -9,7 +9,8 @@
     "web": "tsx src/web/server.ts",
     "extract": "tsx src/extract.ts",
     "test": "tsx --test test/*.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check-open": "tsx src/checkOpen.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5"

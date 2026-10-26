@@ -27,7 +27,8 @@ const realFetch = globalThis.fetch;
 let gw: JudgeGateway;
 let server: Server;
 let base = "";
-let fooledAgent = false; // when true, the fake model itself proposes the injected $9,000
+let fooledAgent = false;
+const metaCalls: string[] = []; // when true, the fake model itself proposes the injected $9,000
 
 // Stands in for Muse Spark: reads each invoice by file name, audits notes for hidden
 // requests, proposes one payment per invoice (plus Harlow if fooled), then a closing message.
@@ -63,6 +64,7 @@ before(async () => {
     if (String(url) === `${META}/asr/transcribe`) {
       return new Response(JSON.stringify({ sessionId: "s", transcript: "pay this week's invoices..", audioDurationMs: 1600, turns: [] }), { status: 200 });
     }
+    if (String(url).startsWith(META)) metaCalls.push(String(url));
     if (String(url).startsWith(META)) return new Response(JSON.stringify(fakeMeta(JSON.parse(String(init?.body)))), { status: 200 });
     return realFetch(url, init);
   }) as typeof fetch;
@@ -195,6 +197,31 @@ test("'this week' narrows the mission to the invoices the agent chose, using tod
   assert.equal(mission.limits.total_usd, 1890);
   assert.equal(decisions(ev).length, 3);
   assert.ok(decisions(ev).every((d) => d.decision === "ALLOW"));
+});
+
+test("Muse Spark Open: refused without a Baseten key; with one, planning goes to Baseten and reading stays on Meta", async () => {
+  delete process.env.BASETEN_API_KEY;
+  const refused = await fetch(`${base}/api/runs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ samples: true, brain: "muse-spark-open" }) });
+  assert.equal(refused.status, 400);
+  assert.match((await refused.json()).error, /BASETEN_API_KEY/);
+
+  process.env.BASETEN_API_KEY = "baseten-key";
+  process.env.BASETEN_API_BASE = `${META}/baseten`; // routed to the same fake model
+  try {
+    const ev = await run({ samples: true, brain: "muse-spark-open" });
+    const started = ev[0];
+    assert.ok(started.type === "started");
+    assert.equal(started.brain, "muse-spark-open");
+    assert.equal(started.model, "meta-models/muse-spark-open");
+    assert.equal(started.readerModel, "muse-spark-1.3");
+    assert.equal(decisions(ev).length, 5);
+    assert.ok(decisions(ev).every((d) => d.decision === "ALLOW"));
+    assert.ok(metaCalls.some((u) => u.startsWith(`${META}/baseten/chat/completions`)), "planning went to Baseten");
+    assert.ok(metaCalls.some((u) => u === `${META}/chat/completions`), "invoice reading stayed on the Meta API");
+  } finally {
+    delete process.env.BASETEN_API_KEY;
+    delete process.env.BASETEN_API_BASE;
+  }
 });
 
 test("a finished run replays its events to a late listener", async () => {
