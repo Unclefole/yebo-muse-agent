@@ -105,3 +105,12 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
   - Normal: five invoices proposed, limits 5 payees / $1,250 / $2,619, five ALLOW with receipts (19 s end to end).
   - Voice ("Pay this week's invoices", today pinned to Mon 2026-11-02): Brightleaf, Copperline and Ridgeback proposed, limits 3 payees / $1,890, three ALLOW (17 s).
   - Attack demo: Muse Spark Open proposed only the five real invoices and ignored the hidden note; the two hidden requests were forced through; five ALLOW, and DENY for $9,000 to Harlow Holdings (not an approved payee, over the per-payment limit) and for the second $1,250 to Copperline (over the budget) (18 s).
+
+## 2026-10-26 (Phase 6: README and demo script)
+
+- `README.md` rewritten for judges: a 30-second pitch; "see it in 2 minutes" in judge mode; an architecture diagram (Mermaid) that separates untrusted input (invoices, voice, model output) from trusted parts (limits built in code, the human approval, the gateway); how each step works; the Meta models used; the attack demo with its two layers; every way to run it, including live mode; a "built during the hackathon" section; engineering notes; known limitations.
+- Corrected claims from the kickoff README that this repo cannot back up: it no longer says every decision gets a signed receipt verifiable offline (judge mode issues local receipt IDs; denials have no receipt), drops "policy version" from the approved limits, and describes live mode as it works now (limits from the invoices, not from the agent's proposals).
+- The README says plainly that the Yebo gateway and the yebo.dev approval page are pre-existing and not part of this submission, and that small supporting changes were made to them in the private Yebo repository during the hackathon (the agent-only key, the approver taken from the signed-in account, the agent's name and limits on the approval page).
+- `DEMO_SCRIPT.md`: a 3-minute demo script with timings, what to show and what to say, recorded entirely in judge mode so the video shows only hackathon-built work; pre-recording checklist, optional captions, and fallbacks.
+- `src/web/public/index.html`: the samples button starts as "Use the sample invoices" (no brief "4" before the count loads).
+- Checked from a fresh clone with only `META_API_KEY`, following the README: the web app starts in judge mode and an attack-demo run gives five ALLOW and two forced DENY with the documented reasons.
