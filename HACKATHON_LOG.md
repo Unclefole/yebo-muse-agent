@@ -17,3 +17,7 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - `src/agent.ts`: the first batch of proposed payments sets the mission limits; the agent prints the approval link, waits for the passkey approval, then checks each payment.
 - `.env.example` and `README.md`: `YEBO_AGENT_SECRET` renamed to `YEBO_HMAC_SECRET`; added `YEBO_BOT_IDENTIFIER` and optional `YEBO_MISSION_TOKEN`; documented the approval step.
 - Dry run stays on. No secrets committed.
+
+## 2026-10-26 (dry run check fix)
+
+- `src/yebo.ts`: the dry run check now accepts `tr_dryrun_` references. The gateway now pays through Stripe Connect transfers, so its dry runs return `tr_dryrun_...` instead of `pi_dryrun_...`, and the old check stopped the run on every allowed payment. `pi_dryrun_` is still accepted for older gateways. Anything else still stops the run.

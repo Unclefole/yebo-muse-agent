@@ -46,7 +46,9 @@ const PAYMENT_CAPABILITY = "payment";
 const CURRENCY = "USD";
 const TTL_MIN_MS = 60_000; // the gateway clamps ttl to [1 min, 1 h]
 const TTL_MAX_MS = 60 * 60_000;
-const DRY_RUN_REFERENCE_PREFIX = "pi_dryrun_";
+// Dry run references: tr_dryrun_ (Stripe Connect transfer, current gateway) and
+// pi_dryrun_ (PaymentIntent, older gateway). A real payment has neither.
+const DRY_RUN_REFERENCE_PREFIXES = ["tr_dryrun_", "pi_dryrun_"];
 
 const gateway = () => process.env.YEBO_GATEWAY_URL ?? "https://gateway.yebo.dev";
 const botIdentifier = () => process.env.YEBO_BOT_IDENTIFIER ?? "yebo-muse-agent";
@@ -133,8 +135,9 @@ export async function checkPayment(missionToken: string, proposal: PaymentPropos
   });
   // Fail closed: anything we cannot read as an allowed, executed payment is a DENY.
   const allowed = status === 200 && data?.decision === "allow" && data?.executed === true;
-  if (allowed && !String(data.external_reference ?? "").startsWith(DRY_RUN_REFERENCE_PREFIX)) {
-    throw new Error(`Yebo ran a payment that was not a dry run (${data.external_reference}). Stopping.`);
+  const reference = String(data?.external_reference ?? "");
+  if (allowed && !DRY_RUN_REFERENCE_PREFIXES.some((prefix) => reference.startsWith(prefix))) {
+    throw new Error(`Yebo ran a payment that was not a dry run (${reference}). Stopping.`);
   }
   const decision: Decision = allowed ? "ALLOW" : "DENY";
   return {
