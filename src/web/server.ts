@@ -12,15 +12,18 @@ import { fileURLToPath } from "node:url";
 import { startGateway, type GatewayMode } from "../gatewayMode.js";
 import { model } from "../muse.js";
 import { SUPPORTED_EXTENSIONS, type InvoiceSource } from "../invoice.js";
-import { runAgent, type RunEvent } from "../runner.js";
+import { runAgent, today, type RunEvent } from "../runner.js";
+import { transcribe, VOICE_MODEL } from "../voice.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(HERE, "public");
 const SAMPLES = join(HERE, "..", "..", "demo", "invoices");
+const VOICE_SAMPLE = join(HERE, "..", "..", "demo", "voice", "pay-this-weeks-invoices.wav");
 
 const MAX_FILES = 10;
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
 const MAX_BODY_BYTES = 45 * 1024 * 1024; // base64 of 10 files plus JSON
+const MAX_VOICE_BYTES = 12 * 1024 * 1024; // base64 of a few minutes of 16 kHz mono WAV
 const RUN_TTL_MS = 60 * 60_000;
 
 const STATIC: Record<string, { file: string; type: string }> = {
@@ -62,7 +65,7 @@ export class WebApp {
       return;
     }
     if (req.method === "GET" && path === "/api/config") {
-      return json(res, 200, { mode: this.gateway.mode, model: model(), gateway: this.gateway.url, dryRun: true });
+      return json(res, 200, { mode: this.gateway.mode, model: model(), voiceModel: VOICE_MODEL, today: today(), gateway: this.gateway.url, dryRun: true });
     }
     if (req.method === "GET" && path === "/api/samples") return json(res, 200, { samples: await sampleNames() });
     const sample = path.match(/^\/api\/samples\/([A-Za-z0-9._-]+)$/);
@@ -73,7 +76,15 @@ export class WebApp {
       res.end(await readFile(join(SAMPLES, sample[1])));
       return;
     }
+    if (req.method === "GET" && path === "/api/voice-sample") {
+      const wav = await readFile(VOICE_SAMPLE).catch(() => null);
+      if (!wav) return json(res, 404, { error: "no voice sample" });
+      res.writeHead(200, { "content-type": "audio/wav", ...SECURITY_HEADERS });
+      res.end(wav);
+      return;
+    }
     if (req.method === "POST" && path === "/api/runs") return this.startRun(req, res);
+    if (req.method === "POST" && path === "/api/transcribe") return this.transcribe(req, res);
     const events = path.match(/^\/api\/runs\/([0-9a-f-]{36})\/events$/);
     if (req.method === "GET" && events) return this.stream(events[1], res);
     json(res, 404, { error: "not found" });
@@ -105,6 +116,27 @@ export class WebApp {
       run.listeners.clear();
     });
     json(res, 201, { id: run.id });
+  }
+
+  // A spoken instruction recorded in the browser (16 kHz mono WAV, base64) to text.
+  private async transcribe(req: IncomingMessage, res: ServerResponse): Promise<void> {
+    const origin = req.headers.origin;
+    if (origin && origin !== `http://${req.headers.host}`) return json(res, 403, { error: "cross-origin request refused" });
+    const raw = await readBody(req, MAX_VOICE_BYTES);
+    if (raw === null) return json(res, 413, { error: "recording too long" });
+    let body: { audio?: unknown; keywords?: unknown };
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      return json(res, 400, { error: "bad JSON" });
+    }
+    if (typeof body.audio !== "string" || !body.audio) return json(res, 400, { error: "no audio" });
+    const keywords = Array.isArray(body.keywords) ? body.keywords.filter((k): k is string => typeof k === "string" && k.length <= 80).slice(0, 50) : [];
+    try {
+      return json(res, 200, { transcript: await transcribe(Buffer.from(body.audio, "base64"), keywords), model: VOICE_MODEL });
+    } catch (err) {
+      return json(res, 400, { error: err instanceof Error ? err.message : String(err) });
+    }
   }
 
   // Uploaded files (base64) or the built-in samples, validated.

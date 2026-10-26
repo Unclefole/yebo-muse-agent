@@ -75,3 +75,14 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - Web app: attack-demo switch, a red "Hidden payment requests found" panel with quotes, FORCED and NOT ON ANY INVOICE flags in the plan and timeline, and a note that the limits come from the invoices.
 - Tests: 27 in total (guarded run reports but never forces; attack demo denies both with the right reasons; a fooled agent cannot widen the mission; detector output validation; full rule list in the deny reason).
 - Checked in Chrome with real `muse-spark-1.3` in judge mode: five ALLOW, two forced DENY with their reasons.
+
+## 2026-10-26 (Phase 4: voice with Muse Voice Transcribe)
+
+- Checked the Meta docs (dev.meta.ai/docs/speech-to-text, /api-reference/voice) before building: `muse-voice-transcribe-1.0`, `POST https://api.meta.ai/v1/asr/transcribe`, multipart with a `request` JSON part (`model`, `audioEncoding: "WAV"`, `mode`, `languageBias`, `keywords`) and an `audio` part; WAV only (mono, 16-bit PCM, 16 or 24 kHz), 10 minutes and 32 MB at most; the text comes back in `transcript`. Confirmed with a live call (1.4 s for a 1.6 s clip).
+- `src/voice.ts`: `transcribe()` sends a clip to Muse Voice Transcribe; `checkWav()` checks the WAV header first and explains what is wrong; `cleanTranscript()` tidies trailing punctuation ("..", "。").
+- Finding: sending `keywords` made the model repeat words on short clips ("paypay this week's invoices"), so the web app sends none.
+- `src/web/`: a microphone button next to the instruction. The browser records with MediaRecorder, downsamples to 16 kHz mono with an OfflineAudioContext and writes a 16-bit WAV in plain JavaScript (no ffmpeg); `/api/transcribe` sends it to Muse Voice Transcribe; the transcript becomes the instruction and the run starts if invoices are selected. A "sample voice command" link (`demo/voice/pay-this-weeks-invoices.wav`, made with macOS `say`) goes through the same path for judges without a microphone.
+- `src/agent.ts`: `--voice <file.wav>` transcribes a spoken instruction.
+- `src/runner.ts`: the agent is told today's date (pin it with `YEBO_TODAY`), and the limits now cover only the invoices the agent chose to pay, still built from the invoices themselves, so "pay this week's invoices" narrows the mission and nothing can widen it.
+- Tests: 33 in total (WAV checks, the documented multipart request, transcript cleanup, the transcribe endpoint, and "this week" narrowing the mission).
+- Checked live: CLI and web app (in Chrome, via the sample voice command through the browser's WAV encoder) with real Muse Voice Transcribe and `muse-spark-1.3`, today pinned to Mon 2026-11-02: heard "Pay this week's invoices", proposed Brightleaf, Copperline and Ridgeback (due Nov 5 to 7), limits 3 payees and $1,890, three ALLOW with receipts.

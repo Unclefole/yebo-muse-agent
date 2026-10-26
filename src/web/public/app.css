@@ -137,3 +137,15 @@ dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .plan li.forced { color: var(--red); }
 .timeline li.attack-banner { border-color: rgba(255, 93, 108, 0.5); border-style: solid; }
 .timeline li.attack-banner .what { color: var(--red); }
+
+/* Phase 4: voice */
+.field label { font-size: 13px; color: var(--muted); }
+.goal-row { display: flex; gap: 8px; }
+.goal-row input { flex: 1; min-width: 0; }
+.mic { flex: none; width: 44px; border-radius: 10px; border: 1px solid var(--line); background: var(--card-2); color: var(--green); cursor: pointer; display: grid; place-items: center; }
+.mic:hover { border-color: var(--green); }
+.mic.recording { background: var(--red); border-color: var(--red); color: #fff; animation: pulse 1.2s infinite ease-in-out; }
+.mic:disabled { opacity: .5; cursor: wait; }
+.voice-status { margin: 6px 0 0; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
+.voice-status.err { color: var(--red); }
+.small-link { font-size: 12px; padding: 6px 0 0; text-align: left; }
