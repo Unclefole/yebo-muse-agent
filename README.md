@@ -47,9 +47,11 @@ npm install
 npm run dev -- "Pay the design contractor $400 for the October logo work"
 ```
 
+When the agent proposes its first payments, it asks Yebo for a mission covering exactly those payees and amounts, then prints a link like `https://yebo.dev/authorize/<id>`. Open it and approve with your passkey. The agent waits for the approval, then sends each payment to Yebo, which allows only what fits inside the approved limits.
+
 ## Safety
 
-Payments run in **dry run** mode. No real money moves in this demo.
+Payments run in **dry run** mode. No real money moves in this demo. The gateway decides dry run, and the agent stops if a result ever comes back that is not a dry run.
 
 ## License
 
