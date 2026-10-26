@@ -36,39 +36,7 @@ Prefer the terminal? `npm run dev -- demo/invoices` does the same run in the CLI
 
 ## How it works
 
-```mermaid
-flowchart LR
-  subgraph untrusted["Untrusted input"]
-    direction TB
-    INV["Invoices<br/>(photos, PDFs)"]
-    VOICE["Spoken<br/>instruction"]
-  end
-
-  subgraph meta["Meta models"]
-    direction TB
-    READ["Muse Spark 1.3<br/>reads invoices,<br/>flags hidden requests"]
-    ASR["Muse Voice<br/>Transcribe"]
-    BRAIN["Agent brain<br/>Muse Spark 1.3 / Open<br/>proposes payments"]
-  end
-
-  subgraph trusted["Trusted: code and Yebo"]
-    direction TB
-    LIMITS["Limits built<br/>from the invoices"]
-    GATE["Yebo checks<br/>every payment<br/>ALLOW / DENY"]
-  end
-
-  INV --> READ
-  VOICE --> ASR --> BRAIN
-  READ --> BRAIN
-  READ --> LIMITS
-  BRAIN -.->|"can only narrow"| LIMITS
-  LIMITS -->|"a human<br/>approves once"| GATE
-  BRAIN -->|"each payment"| GATE
-
-  style untrusted fill:#fdecee,stroke:#e5484d,color:#111
-  style meta fill:#eef3ff,stroke:#5b7fd6,color:#111
-  style trusted fill:#e6f9ef,stroke:#16a36a,color:#111
-```
+![Architecture: untrusted invoices and voice go to Meta models (Muse Spark 1.3 reads invoices and flags hidden requests, Muse Voice Transcribe, and the agent brain on Muse Spark 1.3 or Muse Spark Open proposes payments); trusted code builds the limits from the invoices, a human approves them once, and Yebo checks every payment.](docs/architecture.svg)
 
 1. **Read.** Muse Spark 1.3 reads each invoice image or PDF into JSON (payee, amount, currency, due date, invoice number, payment details, notes) under a strict JSON schema. The answer is validated: payees that look like bank details are refused, written dates are converted, and anything unusable is retried once and then rejected.
 2. **Audit.** A second Muse Spark call lists any payment requests written inside the invoices (prompt injections), with the exact quote. They are shown as red flags and never followed.
