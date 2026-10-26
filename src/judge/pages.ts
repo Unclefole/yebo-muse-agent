@@ -13,7 +13,7 @@ function shell(title: string, body: string): string {
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(title)}</title>
 <style>
-  :root { --bg:#05070a; --card:#0d1319; --line:#1f2a33; --ink:#e8eef2; --muted:#8c99a4; --green:#3ef0a0; --green-ink:#05070a; --warn:#ffb38a; }
+  :root { --bg:#05070a; --card:#0d1319; --line:#1f2a33; --ink:#e8eef2; --muted:#8c99a4; --green:#3ef0a0; --green-ink:#05070a; --info:#6aa8ff; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 -apple-system, system-ui, Segoe UI, sans-serif; }
   main { max-width: 460px; margin: 0 auto; padding: 40px 16px; }
@@ -21,7 +21,7 @@ function shell(title: string, body: string): string {
   .kicker { color:var(--green); font-size:12px; letter-spacing:.12em; text-transform:uppercase; font-weight:600; margin:0 0 8px; }
   h1 { font-size:22px; margin:0 0 6px; overflow-wrap:anywhere; }
   .muted { color:var(--muted); font-size:14px; }
-  .banner { border:1px solid var(--warn); color:var(--warn); border-radius:10px; padding:10px 12px; font-size:13px; margin:0 0 18px; }
+  .banner { border:1px solid var(--info); color:var(--info); border-radius:10px; padding:10px 12px; font-size:13px; margin:0 0 18px; }
   dl { margin:18px 0; display:grid; grid-template-columns:auto 1fr; gap:8px 16px; font-size:15px; }
   dt { color:var(--muted); } dd { margin:0; text-align:right; overflow-wrap:anywhere; }
   button { width:100%; padding:14px; border-radius:12px; font-size:16px; font-weight:600; cursor:pointer; margin-top:10px; }

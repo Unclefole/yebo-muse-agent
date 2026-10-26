@@ -44,3 +44,13 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - `src/extract.ts`: `npm run extract` prints the extracted invoice JSON.
 - `test/`: 15 tests (`npm test`) for the judge gateway rules (through the real client) and invoice reading (Meta API mocked).
 - Live check: all four sample invoices extracted correctly by `muse-spark-1.3` (about 14 s for four), and a full judge-mode run proposed four payments, got one mission approved on the local page, and returned ALLOW with a receipt for each, dry run.
+
+## 2026-10-26 (Phase 2: web app)
+
+- `src/runner.ts`: the agent run (read invoices, plan, request one mission, wait for approval, check each payment) now reports every step as a typed event. The CLI and the web app share it, so both follow exactly the same path.
+- `src/agent.ts`: the CLI prints the runner's events; output unchanged.
+- `src/invoice.ts`: reads uploaded bytes as well as files.
+- `src/web/`: `npm run web` serves a local web app (127.0.0.1 only, no framework, no new dependencies). Upload invoices or use the samples, see what Muse Spark read, the agent's plan and the limits to approve, a button that opens the approval link, and a live timeline (server-sent events) of every Yebo decision: ALLOW, DENY or REQUIRE_APPROVAL, with the reason and the receipt ID. Yebo green accents, red for DENY, blue-grey for REQUIRE_APPROVAL, no yellow. Strict content security policy, no inline scripts, all text written with textContent, same-origin uploads only, size and type limits. Works in judge mode and live mode.
+- `src/judge/pages.ts`: the judge-mode notice is blue instead of peach.
+- `test/web.test.ts`: 4 new tests (19 in total) for the web app: a full sample run streams every step in order with nothing checked before approval, late listeners get the full replay, uploads are validated, the page has a strict CSP.
+- Checked in Chrome in judge mode with real Muse Spark: approving gives four ALLOW entries with receipts; denying gives four REQUIRE_APPROVAL entries with the reason.

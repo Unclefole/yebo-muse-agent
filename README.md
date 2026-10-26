@@ -49,11 +49,19 @@ npm run dev -- demo/invoices
 
 With `YEBO_HMAC_SECRET` empty, the agent runs in **judge mode**: a local stand-in for the Yebo gateway (`src/judge/`, written for this repo, not the real gateway) enforces the same mission rules: allowed payees, per-payment limit, total budget, expiry, fail closed. The agent prints a local approval link; open it and click **Approve** (simulated; the real flow uses your passkey). Every payment is a dry run.
 
+### The web app
+
+```bash
+npm run web          # then open http://127.0.0.1:3000
+```
+
+Drop in invoices (or click **Use the 4 sample invoices**) and press **Run the agent**. You see what Muse Spark read from each invoice, the agent's plan, and the limits you are asked to approve. **Open approval page** takes you to the approval (simulated in judge mode, your passkey at yebo.dev in live mode). The live timeline then shows every payment Yebo checks, ALLOW, DENY or REQUIRE_APPROVAL, with the reason and the receipt ID. The web app runs locally only (it binds 127.0.0.1) and works in judge mode and live mode, same as the CLI.
+
 Other commands:
 
 ```bash
 npm run extract -- demo/invoices     # just read the invoices and print the JSON
-npm test                             # judge gateway rules + invoice reading (no API calls)
+npm test                             # judge gateway, invoice reading and web app (no API calls)
 ```
 
 `demo/invoices/` has four sample invoices from fictional businesses (PNG, a phone-style JPEG and a PDF). Regenerate them with `python3 demo/make_invoices.py`.
