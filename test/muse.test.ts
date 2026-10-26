@@ -41,7 +41,12 @@ test("Muse Spark Open goes to Baseten with the documented model, Bearer key and 
   assert.equal(calls[0].body.temperature, 1.0);
   assert.equal(calls[0].body.top_p, 1.0);
   assert.equal(calls[0].body.reasoning_effort, "medium");
-  assert.equal(calls[0].body.tool_choice, "auto");
+  assert.equal("tool_choice" in calls[0].body, false, "no tools, so no tool_choice (Baseten rejects it)");
+  assert.equal("tools" in calls[0].body, false);
+  const tools = [{ type: "function" as const, function: { name: "t", description: "d", parameters: {} } }];
+  await chat([{ role: "user", content: "hi" }], tools, "muse-spark-open");
+  assert.equal(calls[1].body.tool_choice, "auto");
+  assert.equal(calls[1].body.tools.length, 1);
 });
 
 test("the default brain stays on the Meta Model API with muse-spark-1.3", async () => {

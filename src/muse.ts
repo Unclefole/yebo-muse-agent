@@ -111,7 +111,8 @@ async function complete(body: Record<string, unknown>, brain: Brain = "muse-spar
 }
 
 export async function chat(messages: Message[], tools: Tool[], brain: Brain = "muse-spark"): Promise<Message> {
-  return complete({ messages, tools, tool_choice: "auto" }, brain);
+  // Only send tools when there are some: Baseten rejects tool_choice without tools.
+  return complete({ messages, ...(tools.length ? { tools, tool_choice: "auto" } : {}) }, brain);
 }
 
 // One structured answer, constrained to `format`. Returns the raw JSON text.

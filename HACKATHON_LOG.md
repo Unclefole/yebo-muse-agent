@@ -96,3 +96,12 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - `src/checkOpen.ts`: `npm run check-open` checks the Baseten key (never printed), lists the Muse models the account can use, and runs a test message and a test tool call, with plain-English fixes.
 - Tests: 40 in total (Baseten URL, key, model and settings; the Meta API stays the default and does all structured output; model and effort overrides; the reasoning_effort retry; error messages; the web app refuses Open without a key and, with one, plans on Baseten while reading on Meta).
 - Not yet run live: no Baseten key on this machine yet.
+
+## 2026-10-26 (Phase 5: live runs on Muse Spark Open)
+
+- `npm run check-open` with a real Baseten key found a bug: `chat()` sent `tool_choice` with no tools, which the Meta API ignores but Baseten rejects ("When using `tool_choice`, `tools` must be set."). Tools and `tool_choice` are now sent only when there are tools; test updated.
+- Baseten lists `meta-models/muse-spark-open` for this account (no `-1026` suffix). Test message 0.8 s, test tool call 1.0 s, `reasoning_effort: medium` accepted.
+- Live runs in judge mode with Muse Spark Open as the agent brain (invoices read by `muse-spark-1.3`):
+  - Normal: five invoices proposed, limits 5 payees / $1,250 / $2,619, five ALLOW with receipts (19 s end to end).
+  - Voice ("Pay this week's invoices", today pinned to Mon 2026-11-02): Brightleaf, Copperline and Ridgeback proposed, limits 3 payees / $1,890, three ALLOW (17 s).
+  - Attack demo: Muse Spark Open proposed only the five real invoices and ignored the hidden note; the two hidden requests were forced through; five ALLOW, and DENY for $9,000 to Harlow Holdings (not an approved payee, over the per-payment limit) and for the second $1,250 to Copperline (over the budget) (18 s).
