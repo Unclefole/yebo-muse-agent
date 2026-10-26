@@ -54,3 +54,12 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - `src/judge/pages.ts`: the judge-mode notice is blue instead of peach.
 - `test/web.test.ts`: 4 new tests (19 in total) for the web app: a full sample run streams every step in order with nothing checked before approval, late listeners get the full replay, uploads are validated, the page has a strict CSP.
 - Checked in Chrome in judge mode with real Muse Spark: approving gives four ALLOW entries with receipts; denying gives four REQUIRE_APPROVAL entries with the reason.
+
+## 2026-10-26 (Phase 2 fixes from browser testing)
+
+- `src/invoice.ts`: due dates came back empty with `muse-spark-1.1` because the prompt said to copy text "word for word" and the model returned "Nov 1, 2026", which the parser only accepted as YYYY-MM-DD. The prompt and schema now ask for YYYY-MM-DD, and `normalizeDate()` also converts written dates ("Nov 7, 2026", "7 Nov 2026", "2026/11/07") itself. All-numeric day/month dates are ambiguous and stay empty.
+- `src/invoice.ts`: the payee could come back as the "how to pay" block ("Pay Nimbus Cloud Hosting / Fictional Bank, account ending 3350"). The schema now asks for the business name in the invoice header only, and `cleanPayee()` keeps the first line, drops a leading "Pay"/"Pay to"/"Bank transfer to" and a trailing bank line from the payment details. A payee that still mentions a bank or account is refused, never paid.
+- `src/invoice.ts`: a JSON answer wrapped in a code fence or a sentence still parses, and an unusable answer is retried once.
+- `src/web/public/`: notes on invoices are collapsed behind a small "Show note" toggle.
+- `test/invoice.test.ts`: tests for the exact Nimbus payee string (with and without the line break), date conversion, wrapped JSON and the single retry (22 tests in total).
+- Live check: the four samples on `muse-spark-1.1` (three runs) and `muse-spark-1.3` now give the right payee and due date for every invoice; one 1.1 run returned malformed JSON once, which the new retry covers.
