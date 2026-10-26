@@ -55,10 +55,8 @@ flowchart LR
     direction TB
     LIMITS["Limits built from<br/>the invoices"]
     HUMAN["Human approves<br/>the limits once"]
-    GATE["Yebo checks<br/>every payment"]
+    GATE["Yebo checks every payment<br/>ALLOW · DENY · REQUIRE_APPROVAL<br/>with reason and receipt"]
   end
-
-  OUT["ALLOW · DENY<br/>REQUIRE_APPROVAL<br/>+ reason, receipt"]
 
   INV --> READ
   VOICE --> ASR --> BRAIN
@@ -67,7 +65,6 @@ flowchart LR
   BRAIN -.->|"can only narrow"| LIMITS
   LIMITS --> HUMAN --> GATE
   BRAIN -->|"each payment"| GATE
-  GATE --> OUT
 
   style untrusted fill:#fdecee,stroke:#e5484d,color:#111
   style meta fill:#eef3ff,stroke:#5b7fd6,color:#111
