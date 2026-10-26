@@ -37,26 +37,24 @@ Prefer the terminal? `npm run dev -- demo/invoices` does the same run in the CLI
 ## How it works
 
 ```mermaid
-%%{init: {"flowchart": {"diagramPadding": 48}}}%%
 flowchart LR
   subgraph untrusted["Untrusted input"]
     direction TB
-    INV["Invoice photos and PDFs"]
-    VOICE["Spoken instruction"]
+    INV["Invoices<br/>(photos, PDFs)"]
+    VOICE["Spoken<br/>instruction"]
   end
 
   subgraph meta["Meta models"]
     direction TB
     READ["Muse Spark 1.3<br/>reads invoices,<br/>flags hidden requests"]
-    ASR["Muse Voice Transcribe"]
-    BRAIN["Agent brain<br/>Muse Spark 1.3 or Open<br/>proposes payments"]
+    ASR["Muse Voice<br/>Transcribe"]
+    BRAIN["Agent brain<br/>Muse Spark 1.3 / Open<br/>proposes payments"]
   end
 
   subgraph trusted["Trusted: code and Yebo"]
     direction TB
-    LIMITS["Limits built from<br/>the invoices"]
-    HUMAN["Human approves<br/>the limits once"]
-    GATE["Yebo checks every payment<br/>ALLOW · DENY · REQUIRE_APPROVAL<br/>with reason and receipt"]
+    LIMITS["Limits built<br/>from the invoices"]
+    GATE["Yebo checks<br/>every payment<br/>ALLOW / DENY"]
   end
 
   INV --> READ
@@ -64,7 +62,7 @@ flowchart LR
   READ --> BRAIN
   READ --> LIMITS
   BRAIN -.->|"can only narrow"| LIMITS
-  LIMITS --> HUMAN --> GATE
+  LIMITS -->|"a human<br/>approves once"| GATE
   BRAIN -->|"each payment"| GATE
 
   style untrusted fill:#fdecee,stroke:#e5484d,color:#111
