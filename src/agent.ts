@@ -1,7 +1,7 @@
 // Agent loop: Muse Spark plans and proposes payments; Yebo decides; only ALLOW proceeds.
 import "dotenv/config";
 import { chat, type Message, type Tool } from "./muse.js";
-import { checkPayment, requestMission, waitForApproval, type PaymentProposal } from "./yebo.js";
+import { checkPayment, requestMission, waitForApproval, DRY_RUN_OUTCOME, type PaymentProposal } from "./yebo.js";
 
 const MISSION_TTL_MS = 15 * 60_000;
 
@@ -43,11 +43,14 @@ const tools: Tool[] = [
 
 const system = `You are a finance operations agent. Break the user's goal into individual payments and
 call propose_payment for each one. You can propose; you cannot execute. If Yebo returns DENY or
-REQUIRE_APPROVAL, explain why to the user and do not try to work around it.`;
+REQUIRE_APPROVAL, explain why to the user and do not try to work around it.
+Payments run in dry run. When Yebo returns ALLOW, say the payment was "${DRY_RUN_OUTCOME}".
+Never say a payment was executed, sent, paid or transferred.`;
 
 async function run(goal: string) {
   let missionToken = process.env.YEBO_MISSION_TOKEN ?? ""; // issued after the human approves the mission
   let missionRequested = missionToken !== "";
+  const results: Result[] = [];
   const messages: Message[] = [
     { role: "system", content: system },
     { role: "user", content: goal },
@@ -59,6 +62,7 @@ async function run(goal: string) {
 
     if (!reply.tool_calls?.length) {
       console.log(`\nAgent: ${reply.content}`);
+      printSummary(results);
       return;
     }
 
@@ -74,11 +78,28 @@ async function run(goal: string) {
 
     for (const [i, call] of reply.tool_calls.entries()) {
       const result = await checkPayment(missionToken, proposals[i]);
+      results.push({ proposal: proposals[i], decision: result.decision, outcome: result.outcome, receipt: result.receipt });
       console.log(
-        `Yebo: ${result.decision}${result.receipt ? `  receipt ${result.receipt}` : ""}${result.reason ? `  (${result.reason})` : ""}`,
+        `Yebo: ${result.decision}, ${result.outcome}${result.receipt ? `  receipt ${result.receipt}` : ""}${result.reason ? `  (${result.reason})` : ""}`,
       );
-      messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
+      // The model gets the decision in plain words, not the gateway's raw response
+      // (which says executed: true even in dry run).
+      const forModel = { decision: result.decision, outcome: result.outcome, reason: result.reason, receipt: result.receipt };
+      messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(forModel) });
     }
+  }
+  printSummary(results);
+}
+
+type Result = { proposal: PaymentProposal; decision: string; outcome: string; receipt?: string };
+
+// Printed by the code, not the model, so the last word on what happened is always accurate.
+function printSummary(results: Result[]) {
+  if (!results.length) return;
+  console.log("\nSummary:");
+  for (const r of results) {
+    const line = r.decision === "ALLOW" ? DRY_RUN_OUTCOME : r.outcome;
+    console.log(`  $${r.proposal.amount_usd} to ${r.proposal.payee}: ${line}${r.receipt ? `  receipt ${r.receipt}` : ""}`);
   }
 }
 

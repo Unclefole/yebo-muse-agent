@@ -21,3 +21,13 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 ## 2026-10-26 (dry run check fix)
 
 - `src/yebo.ts`: the dry run check now accepts `tr_dryrun_` references. The gateway now pays through Stripe Connect transfers, so its dry runs return `tr_dryrun_...` instead of `pi_dryrun_...`, and the old check stopped the run on every allowed payment. `pi_dryrun_` is still accepted for older gateways. Anything else still stops the run.
+
+## 2026-10-26 (milestone: first live end-to-end run)
+
+- First live run against the production Yebo gateway: Muse Spark proposed a $400 payment to the design contractor, the agent asked Yebo for a mission covering it, a human approved the limits with a Touch ID passkey at `yebo.dev/authorize/<id>`, and Yebo returned ALLOW with receipt `rcpt_1185e4fd-…`. Dry run: no money moved.
+
+## 2026-10-26 (dry run wording)
+
+- `src/yebo.ts`: `checkPayment()` now returns an `outcome` in plain words; an ALLOW is "approved (dry run, no money moved)".
+- `src/agent.ts`: the model gets the decision and that outcome instead of the gateway's raw response, which says `executed: true` even in dry run. The system prompt tells it never to say executed, sent, paid or transferred.
+- `src/agent.ts`: each run ends with a summary printed by the code, not the model, so the final word on each payment is always accurate.

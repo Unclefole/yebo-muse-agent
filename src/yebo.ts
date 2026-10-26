@@ -50,6 +50,10 @@ const TTL_MAX_MS = 60 * 60_000;
 // pi_dryrun_ (PaymentIntent, older gateway). A real payment has neither.
 const DRY_RUN_REFERENCE_PREFIXES = ["tr_dryrun_", "pi_dryrun_"];
 
+// What an ALLOW means here. Every allowed payment is a dry run (anything else stops the
+// run), so it was approved but no money moved. Never call it executed, sent or paid.
+export const DRY_RUN_OUTCOME = "approved (dry run, no money moved)";
+
 const gateway = () => process.env.YEBO_GATEWAY_URL ?? "https://gateway.yebo.dev";
 const botIdentifier = () => process.env.YEBO_BOT_IDENTIFIER ?? "yebo-muse-agent";
 
@@ -127,7 +131,7 @@ export async function waitForApproval(mission: Mission, pollMs = 3_000): Promise
 
 export async function checkPayment(missionToken: string, proposal: PaymentProposal) {
   if (!missionToken) {
-    return { status: 0, decision: "REQUIRE_APPROVAL" as Decision, reason: "no approved mission", raw: {} };
+    return { status: 0, decision: "REQUIRE_APPROVAL" as Decision, outcome: "waiting for approval", reason: "no approved mission", raw: {} };
   }
   const { status, data } = await call("POST", "/execute", {
     token: missionToken,
@@ -143,6 +147,7 @@ export async function checkPayment(missionToken: string, proposal: PaymentPropos
   return {
     status,
     decision,
+    outcome: allowed ? DRY_RUN_OUTCOME : "denied",
     reason: allowed ? undefined : ((data?.reason ?? data?.error ?? `gateway returned ${status}`) as string),
     receipt: data?.receipt_id as string | undefined,
     raw: data,
