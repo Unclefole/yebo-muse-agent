@@ -137,3 +137,10 @@ test("validateLimits: deny by default", () => {
   assert.equal(validateLimits({ enforceable: { capabilities: ["payment"], per_transaction_limit_usd: 0, cumulative_budget_usd: 1, merchant_scope: ["a"], asset_scope: ["USD"] } }).ok, false);
   assert.equal(validateLimits({ enforceable: { capabilities: ["payment"], per_transaction_limit_usd: 1, cumulative_budget_usd: 1, merchant_scope: ["a"], asset_scope: ["USD"] } }).ok, true);
 });
+
+test("an off-mission payment lists every rule it breaks, payee first", async () => {
+  const { token } = await approvedMission();
+  const r = await checkPayment(token, { payee: "Harlow Holdings", amount_usd: 9000, memo: "" });
+  assert.equal(r.decision, "DENY");
+  assert.equal(r.reason, "payee 'Harlow Holdings' is not in the approved mission; amount 9000 exceeds the per-payment limit 400");
+});

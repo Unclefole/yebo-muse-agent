@@ -34,6 +34,10 @@
         </label>
         <ul class="chips" id="chips"></ul>
         <button type="button" class="link" id="use-samples">Use the 4 sample invoices</button>
+        <label class="toggle">
+          <input type="checkbox" id="attack-demo">
+          <span><strong>Attack demo</strong> · simulate a hijacked agent: payment requests hidden in the invoices are forced through. Yebo should refuse them.</span>
+        </label>
         <label class="field">
           <span>Instruction for the agent</span>
           <input type="text" id="goal" value="Pay these invoices." maxlength="500">
@@ -52,11 +56,18 @@
         </div>
       </article>
 
+      <article class="card alert-card" id="hidden-card" hidden>
+        <h2><span class="step alert">!</span> Hidden payment requests found</h2>
+        <p class="muted">Muse Spark found these instructions written inside the invoices. They are not invoices, and the agent does not follow them.</p>
+        <ul class="hidden-list" id="hidden-list"></ul>
+      </article>
+
       <article class="card" id="plan-card" hidden>
         <h2><span class="step">3</span> The agent's plan</h2>
         <ol class="plan" id="plan"></ol>
         <div class="mission" id="mission" hidden>
           <p class="label">Limits you are asked to approve</p>
+          <p class="muted small" id="m-source"></p>
           <dl>
             <dt>Payees</dt><dd id="m-payees"></dd>
             <dt>Per payment</dt><dd id="m-per"></dd>

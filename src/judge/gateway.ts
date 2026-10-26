@@ -96,15 +96,18 @@ export function paymentRefusal(m: JudgeMission, action: Record<string, unknown>)
     return { status: 403, error: "OUT_OF_SCOPE", reason: `capability '${String(capability)}' is not in the approved mission` };
   }
   if (!money(amount) || amount === 0) return { status: 400, error: "INVALID_AMOUNT", reason: "amount must be a number above zero" };
-  if (amount > m.limits.per_transaction_limit_usd) {
-    return { status: 403, error: "OUT_OF_SCOPE", reason: `amount ${amount} exceeds the per-payment limit ${m.limits.per_transaction_limit_usd}` };
-  }
+  // Every scope rule the payment breaks, payee first, so the reason tells the whole story.
+  const outOfScope: string[] = [];
   if (m.limits.merchant_scope.length > 0 && (typeof merchant !== "string" || !m.limits.merchant_scope.includes(merchant))) {
-    return { status: 403, error: "OUT_OF_SCOPE", reason: `payee '${String(merchant ?? "")}' is not in the approved mission` };
+    outOfScope.push(`payee '${String(merchant ?? "")}' is not in the approved mission`);
+  }
+  if (amount > m.limits.per_transaction_limit_usd) {
+    outOfScope.push(`amount ${amount} exceeds the per-payment limit ${m.limits.per_transaction_limit_usd}`);
   }
   if (m.limits.asset_scope.length > 0 && (typeof asset !== "string" || !m.limits.asset_scope.includes(asset))) {
-    return { status: 403, error: "OUT_OF_SCOPE", reason: `currency '${String(asset ?? "")}' is not in the approved mission` };
+    outOfScope.push(`currency '${String(asset ?? "")}' is not in the approved mission`);
   }
+  if (outOfScope.length) return { status: 403, error: "OUT_OF_SCOPE", reason: outOfScope.join("; ") };
   const left = m.limits.cumulative_budget_usd - m.spent_usd;
   if (amount > left + 1e-9) {
     return { status: 402, error: "BUDGET_EXHAUSTED", reason: `amount ${amount} exceeds the budget left (${Math.max(0, Math.round(left * 100) / 100)})` };

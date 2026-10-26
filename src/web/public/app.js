@@ -92,7 +92,7 @@ $("run").addEventListener("click", async () => {
   run.disabled = true;
   run.textContent = "Starting…";
   try {
-    const body = { goal: $("goal").value };
+    const body = { goal: $("goal").value, attackDemo: $("attack-demo").checked };
     if (state.samples) body.samples = true;
     else body.files = await Promise.all(state.files.map(async (f) => ({ name: f.name, data: await toBase64(f) })));
     const res = await fetch("/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -111,8 +111,8 @@ $("run").addEventListener("click", async () => {
 function resetRun() {
   if (state.source) state.source.close();
   state.results = [];
-  for (const id of ["invoices", "plan", "timeline"]) $(id).replaceChildren();
-  for (const id of ["read-card", "plan-card", "mission", "totals", "agent-msg"]) $(id).hidden = true;
+  for (const id of ["invoices", "plan", "timeline", "hidden-list"]) $(id).replaceChildren();
+  for (const id of ["read-card", "hidden-card", "plan-card", "mission", "totals", "agent-msg"]) $(id).hidden = true;
   $("timeline-empty").hidden = false;
   setMissionStatus("wait", "Waiting for your approval…");
 }
@@ -142,11 +142,16 @@ function finish() {
 function handle(e) {
   switch (e.type) {
     case "started":
+      if (e.agentMode === "attack-demo") {
+        step("Attack demo: payment requests hidden in the invoices will be forced through, as if the agent had been hijacked.", "attack-banner");
+      }
       step(e.invoices ? `Reading ${e.invoices} invoice${e.invoices === 1 ? "" : "s"} with ${e.model}` : `Planning with ${e.model}`);
       break;
     case "invoice": return addInvoice(e.invoice);
     case "invoice_error": return addInvoiceError(e.file, e.error);
-    case "proposed": return addProposal(e.id, e.proposal);
+    case "proposed": return addProposal(e);
+    case "hidden_requests": return showHidden(e.requests);
+    case "no_mission": return step(`No mission requested: ${e.reason}. Nothing will run.`);
     case "proposal_refused": return step("Refused a malformed proposal from the model");
     case "mission": return showMission(e);
     case "mission_result":
@@ -201,13 +206,29 @@ function addInvoiceError(file, error) {
   $("invoices").append(tr);
 }
 
-function addProposal(id, p) {
+function addProposal(e) {
+  const p = e.proposal;
   $("plan-card").hidden = false;
-  const li = el("li");
-  li.id = `plan-${id}`;
+  const li = el("li", e.forced ? "forced" : "");
+  li.id = `plan-${e.id}`;
   li.append(el("span", "amt", usd(p.amount_usd)), document.createTextNode(` to ${p.payee}`));
+  if (e.forced) li.append(el("span", "flag", "FORCED · attack demo"));
+  else if (e.matchesInvoice === false) li.append(el("span", "flag", "NOT ON ANY INVOICE"));
   if (p.memo) li.append(el("span", "memo", p.memo));
   $("plan").append(li);
+}
+
+function showHidden(requests) {
+  const list = $("hidden-list");
+  for (const r of requests) {
+    const li = el("li");
+    li.append(el("strong", "", `${usd(r.amount_usd)} to ${r.payee}`));
+    if (r.quote) li.append(el("span", "quote", `“${r.quote}”`));
+    li.append(el("span", "from", `Written inside ${r.invoice_file}`));
+    list.append(li);
+  }
+  $("hidden-card").hidden = false;
+  step(`Found ${requests.length} hidden payment request${requests.length === 1 ? "" : "s"} inside the invoices`, "DENY");
 }
 
 function showMission(e) {
@@ -216,6 +237,9 @@ function showMission(e) {
   $("m-payees").textContent = e.limits.payees.join(", ");
   $("m-per").textContent = usd(e.limits.per_payment_usd);
   $("m-total").textContent = usd(e.limits.total_usd);
+  $("m-source").textContent = e.source === "invoices"
+    ? "Built from the invoices themselves, not from the agent's plan. Anything else is refused."
+    : "Built from the agent's plan (no invoices in this run).";
   $("m-expires").textContent = new Date(e.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const link = $("approve-link");
   link.hidden = false;
@@ -243,6 +267,7 @@ function addDecision(d) {
   const li = el("li", d.decision);
   const what = el("span", "what");
   what.append(el("span", `decision ${d.decision}`, d.decision), document.createTextNode(`${usd(d.proposal.amount_usd)} to ${d.proposal.payee}`));
+  if (d.forced) what.append(el("span", "flag", "FORCED"));
   li.append(el("span", "time", clock()), what);
   li.append(el("span", "sub", d.decision === "ALLOW" ? d.outcome : `${d.outcome}${d.reason ? `: ${d.reason}` : ""}`));
   if (d.receipt) {

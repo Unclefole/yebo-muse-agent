@@ -85,7 +85,7 @@ export class WebApp {
     if (origin && origin !== `http://${req.headers.host}`) return json(res, 403, { error: "cross-origin request refused" });
     const raw = await readBody(req, MAX_BODY_BYTES);
     if (raw === null) return json(res, 413, { error: "upload too large" });
-    let body: { goal?: unknown; files?: unknown; samples?: unknown };
+    let body: { goal?: unknown; files?: unknown; samples?: unknown; attackDemo?: unknown };
     try {
       body = JSON.parse(raw);
     } catch {
@@ -98,7 +98,8 @@ export class WebApp {
     const run: Run = { id: randomUUID(), events: [], listeners: new Set(), finished: false, created: Date.now() };
     this.runs.set(run.id, run);
     this.prune();
-    runAgent({ goal, sources: sources.list }, this.gateway, (e) => this.publish(run, e)).finally(() => {
+    const agentMode = body.attackDemo === true ? "attack-demo" : "guarded";
+    runAgent({ goal, sources: sources.list, agentMode }, this.gateway, (e) => this.publish(run, e)).finally(() => {
       run.finished = true;
       for (const l of run.listeners) l.end();
       run.listeners.clear();
