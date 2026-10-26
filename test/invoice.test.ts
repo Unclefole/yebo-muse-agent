@@ -3,7 +3,7 @@
 // The Meta API is mocked here; nothing leaves the machine.
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { extractInvoice, invoicePart, parseInvoice, INVOICE_FORMAT } from "../src/invoice.js";
+import { extractInvoice, invoicePart, parseInvoice, cleanPayee, normalizeDate, INVOICE_FORMAT } from "../src/invoice.js";
 
 const PNG = "demo/invoices/brightleaf-studio-INV-1042.png";
 const PDF = "demo/invoices/nimbus-hosting-NH-88317.pdf";
@@ -54,10 +54,69 @@ test("extractInvoice sends a strict json_schema request and validates the answer
 test("parseInvoice refuses anything that is not a usable invoice", () => {
   const ok = { payee: "A", amount: 10, currency: "USD", due_date: null, invoice_number: null, payment_details: null, notes: null };
   assert.throws(() => parseInvoice("f", "not json"), /did not return JSON/);
-  assert.throws(() => parseInvoice("f", JSON.stringify({ ...ok, payee: "  " })), /no payee/);
+  assert.throws(() => parseInvoice("f", JSON.stringify({ ...ok, payee: "  " })), /no usable payee/);
   assert.throws(() => parseInvoice("f", JSON.stringify({ ...ok, amount: -5 })), /no valid amount/);
   assert.throws(() => parseInvoice("f", JSON.stringify({ ...ok, amount: "400" })), /no valid amount/);
   assert.throws(() => parseInvoice("f", JSON.stringify({ ...ok, currency: "dollars" })), /no valid currency/);
   assert.equal(parseInvoice("f", JSON.stringify({ ...ok, due_date: "next Friday" })).due_date, null);
   assert.equal(parseInvoice("f", JSON.stringify({ ...ok, amount: 10.005 })).amount, 10.01);
+});
+
+test("payee: the Nimbus 'how to pay' block becomes just the business name", () => {
+  const details = "Pay Nimbus Cloud Hosting\nFictional Bank, account ending 3350";
+  // As the model returned it (newline), and as the page showed it (one line).
+  assert.equal(cleanPayee("Pay Nimbus Cloud Hosting\nFictional Bank, account ending 3350", details), "Nimbus Cloud Hosting");
+  assert.equal(cleanPayee("Pay Nimbus Cloud Hosting Fictional Bank, account ending 3350", details), "Nimbus Cloud Hosting");
+  assert.equal(cleanPayee("Bank transfer to Brightleaf Design Studio", null), "Brightleaf Design Studio");
+  assert.equal(cleanPayee("Nimbus Cloud Hosting", details), "Nimbus Cloud Hosting");
+  assert.equal(cleanPayee("Juniper & Rye Catering", null), "Juniper & Rye Catering");
+  // Still looks like bank details: refused, never paid.
+  assert.equal(cleanPayee("Nimbus Cloud Hosting Fictional Bank, account ending 3350", null), null);
+  assert.equal(cleanPayee("IBAN GB00 0000 0000", null), null);
+
+  const parsed = parseInvoice("nimbus-hosting-NH-88317.pdf", JSON.stringify({
+    payee: "Pay Nimbus Cloud Hosting\nFictional Bank, account ending 3350", amount: 89, currency: "USD", due_date: "Nov 1, 2026",
+    invoice_number: "NH-88317", payment_details: details, notes: null,
+  }));
+  assert.equal(parsed.payee, "Nimbus Cloud Hosting");
+  assert.equal(parsed.due_date, "2026-11-01");
+  assert.throws(() => parseInvoice("f", JSON.stringify({ ...parsedJson(), payee: "Fictional Bank, account ending 3350" })), /no usable payee/);
+});
+
+test("due dates as printed on the samples are converted to YYYY-MM-DD", () => {
+  assert.equal(normalizeDate("Nov 7, 2026"), "2026-11-07");
+  assert.equal(normalizeDate("Nov 1, 2026"), "2026-11-01");
+  assert.equal(normalizeDate("November 12 2026"), "2026-11-12");
+  assert.equal(normalizeDate("5 Nov 2026"), "2026-11-05");
+  assert.equal(normalizeDate("Nov. 5th, 2026"), "2026-11-05");
+  assert.equal(normalizeDate("2026-11-07"), "2026-11-07");
+  assert.equal(normalizeDate("2026/11/7"), "2026-11-07");
+  assert.equal(normalizeDate("07/11/2026"), null, "day/month order is ambiguous");
+  assert.equal(normalizeDate("Feb 30, 2026"), null);
+  assert.equal(normalizeDate("next Friday"), null);
+  assert.equal(normalizeDate(null), null);
+});
+
+function parsedJson() {
+  return { payee: "A", amount: 10, currency: "USD", due_date: null, invoice_number: null, payment_details: null, notes: null };
+}
+
+test("a fenced or wrapped JSON answer still parses; a bad first answer is retried once", async () => {
+  const good = { payee: "A", amount: 10, currency: "USD", due_date: null, invoice_number: null, payment_details: null, notes: null };
+  assert.equal(parseInvoice("f", "```json\n" + JSON.stringify(good) + "\n```").payee, "A");
+  assert.equal(parseInvoice("f", "Here is the invoice: " + JSON.stringify(good)).payee, "A");
+
+  process.env.META_API_KEY = "test-key";
+  process.env.META_API_BASE = "https://api.meta.test/v1";
+  const answers = ["not json at all", JSON.stringify({ ...good, payee: "Brightleaf Design Studio" })];
+  let calls = 0;
+  globalThis.fetch = (async () =>
+    new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: answers[calls++] } }] }), { status: 200 })) as unknown as typeof fetch;
+  assert.equal((await extractInvoice(PNG)).payee, "Brightleaf Design Studio");
+  assert.equal(calls, 2);
+
+  calls = 0;
+  answers[1] = "still not json";
+  await assert.rejects(extractInvoice(PNG), /did not return JSON/);
+  assert.equal(calls, 2, "no more than one retry");
 });

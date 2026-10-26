@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Yebo AP Agent</title>
+  <link rel="stylesheet" href="/app.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true">Y</span>
+      <div>
+        <h1>Yebo AP Agent</h1>
+        <p class="tagline">AI pays your invoices. It cannot be tricked into paying anyone else.</p>
+      </div>
+    </div>
+    <div class="badges">
+      <span id="mode-badge" class="badge">…</span>
+      <span id="model-badge" class="badge subtle">…</span>
+      <span class="badge subtle">Dry run · no money moves</span>
+    </div>
+  </header>
+
+  <main class="grid">
+    <section class="col">
+      <article class="card" id="upload-card">
+        <h2><span class="step">1</span> Invoices</h2>
+        <label class="drop" id="drop">
+          <input type="file" id="file-input" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.pdf">
+          <strong>Drop invoices here</strong>
+          <span>or click to choose · PNG, JPEG, GIF, WebP or PDF</span>
+        </label>
+        <ul class="chips" id="chips"></ul>
+        <button type="button" class="link" id="use-samples">Use the 4 sample invoices</button>
+        <label class="field">
+          <span>Instruction for the agent</span>
+          <input type="text" id="goal" value="Pay these invoices." maxlength="500">
+        </label>
+        <button type="button" class="primary" id="run" disabled>Run the agent</button>
+        <p class="error" id="upload-error" hidden></p>
+      </article>
+
+      <article class="card" id="read-card" hidden>
+        <h2><span class="step">2</span> What Muse Spark read</h2>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Payee</th><th class="num">Amount</th><th>Due</th><th>Invoice</th></tr></thead>
+            <tbody id="invoices"></tbody>
+          </table>
+        </div>
+      </article>
+
+      <article class="card" id="plan-card" hidden>
+        <h2><span class="step">3</span> The agent's plan</h2>
+        <ol class="plan" id="plan"></ol>
+        <div class="mission" id="mission" hidden>
+          <p class="label">Limits you are asked to approve</p>
+          <dl>
+            <dt>Payees</dt><dd id="m-payees"></dd>
+            <dt>Per payment</dt><dd id="m-per"></dd>
+            <dt>Total budget</dt><dd id="m-total"></dd>
+            <dt>Expires</dt><dd id="m-expires"></dd>
+          </dl>
+          <a class="primary button" id="approve-link" target="_blank" rel="noopener noreferrer">Open approval page</a>
+          <p class="status" id="mission-status"><span class="dot"></span><span>Waiting for your approval…</span></p>
+        </div>
+      </article>
+    </section>
+
+    <section class="col timeline-col">
+      <article class="card timeline-card">
+        <h2><span class="step">4</span> Live timeline</h2>
+        <p class="muted" id="timeline-empty">Each payment Yebo checks shows up here: ALLOW, DENY or REQUIRE_APPROVAL, with the reason and the receipt ID.</p>
+        <ol class="timeline" id="timeline"></ol>
+        <div class="totals" id="totals" hidden></div>
+        <details class="agent-msg" id="agent-msg" hidden>
+          <summary>What the agent said</summary>
+          <p id="agent-text"></p>
+        </details>
+      </article>
+    </section>
+  </main>
+
+  <footer class="foot" id="foot"></footer>
+</body>
+</html>
