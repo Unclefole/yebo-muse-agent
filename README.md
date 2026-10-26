@@ -36,18 +36,31 @@ This entire repository was created during the hackathon (Oct 26 to Nov 4, 2026).
 
 | Model | Role |
 |---|---|
-| Muse Spark (`muse-spark-1.1`) | Agent brain: planning and tool calling |
+| Muse Spark (`muse-spark-1.3`) | Reads invoice images and PDFs (vision + JSON schema output), then plans payments with tool calling |
 | More to come | See HACKATHON_LOG.md |
 
-## Run it
+## Run it in judge mode (only a Meta API key needed)
 
 ```bash
-cp .env.example .env     # add your keys (never commit .env)
 npm install
-npm run dev -- "Pay the design contractor $400 for the October logo work"
+echo 'META_API_KEY=your-meta-key' > .env      # never commit .env
+npm run dev -- demo/invoices
 ```
 
-When the agent proposes its first payments, it asks Yebo for a mission covering exactly those payees and amounts, then prints a link like `https://yebo.dev/authorize/<id>`. Open it and approve with your passkey. The agent waits for the approval, then sends each payment to Yebo, which allows only what fits inside the approved limits.
+With `YEBO_HMAC_SECRET` empty, the agent runs in **judge mode**: a local stand-in for the Yebo gateway (`src/judge/`, written for this repo, not the real gateway) enforces the same mission rules: allowed payees, per-payment limit, total budget, expiry, fail closed. The agent prints a local approval link; open it and click **Approve** (simulated; the real flow uses your passkey). Every payment is a dry run.
+
+Other commands:
+
+```bash
+npm run extract -- demo/invoices     # just read the invoices and print the JSON
+npm test                             # judge gateway rules + invoice reading (no API calls)
+```
+
+`demo/invoices/` has four sample invoices from fictional businesses (PNG, a phone-style JPEG and a PDF). Regenerate them with `python3 demo/make_invoices.py`.
+
+## Run it live (against the real Yebo gateway)
+
+Set `YEBO_HMAC_SECRET` to the agent key issued for this project, then run the same command. The agent asks Yebo for a mission covering exactly the payees and amounts it proposed, then prints a link like `https://yebo.dev/authorize/<id>`. Open it and approve with your passkey. The agent waits for the approval, then sends each payment to Yebo, which allows only what fits inside the approved limits.
 
 ## Safety
 
