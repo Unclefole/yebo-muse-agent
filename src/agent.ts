@@ -1,7 +1,25 @@
 // Agent loop: Muse Spark plans and proposes payments; Yebo decides; only ALLOW proceeds.
 import "dotenv/config";
 import { chat, type Message, type Tool } from "./muse.js";
-import { checkPayment, type PaymentProposal } from "./yebo.js";
+import { checkPayment, requestMission, waitForApproval, type PaymentProposal } from "./yebo.js";
+
+const MISSION_TTL_MS = 15 * 60_000;
+
+// Asks Yebo for a mission that covers exactly these proposals, then waits for a human
+// to approve it with a passkey. Returns the mission token, or "" if it was not approved.
+async function approveMission(goal: string, proposals: PaymentProposal[]): Promise<string> {
+  const mission = await requestMission(goal, {
+    per_transaction_usd: Math.max(...proposals.map((p) => p.amount_usd)),
+    cumulative_usd: proposals.reduce((sum, p) => sum + p.amount_usd, 0),
+    payees: [...new Set(proposals.map((p) => p.payee))],
+    expires_at: new Date(Date.now() + MISSION_TTL_MS).toISOString(),
+  });
+  console.log(`\nApprove these limits with your passkey: ${mission.authorizeUrl}`);
+  if (mission.requiredApprovals > 1) console.log(`(needs ${mission.requiredApprovals} different approvers)`);
+  const token = await waitForApproval(mission);
+  console.log(token ? "Mission approved." : "Mission was not approved. Nothing will run.");
+  return token ?? "";
+}
 
 const tools: Tool[] = [
   {
@@ -28,7 +46,8 @@ call propose_payment for each one. You can propose; you cannot execute. If Yebo 
 REQUIRE_APPROVAL, explain why to the user and do not try to work around it.`;
 
 async function run(goal: string) {
-  const missionToken = process.env.YEBO_MISSION_TOKEN ?? ""; // issued after the human approves the mission
+  let missionToken = process.env.YEBO_MISSION_TOKEN ?? ""; // issued after the human approves the mission
+  let missionRequested = missionToken !== "";
   const messages: Message[] = [
     { role: "system", content: system },
     { role: "user", content: goal },
@@ -43,11 +62,21 @@ async function run(goal: string) {
       return;
     }
 
-    for (const call of reply.tool_calls) {
-      const proposal = JSON.parse(call.function.arguments) as PaymentProposal;
-      console.log(`\nProposed: $${proposal.amount_usd} to ${proposal.payee} (${proposal.memo})`);
-      const result = await checkPayment(missionToken, proposal);
-      console.log(`Yebo: ${result.decision}${result.receipt ? `  receipt ${result.receipt}` : ""}`);
+    const proposals = reply.tool_calls.map((call) => JSON.parse(call.function.arguments) as PaymentProposal);
+    for (const p of proposals) console.log(`\nProposed: $${p.amount_usd} to ${p.payee} (${p.memo})`);
+
+    // One mission per run: the first batch of proposals sets the limits the human approves.
+    // Anything proposed later must fit inside them or Yebo denies it.
+    if (!missionRequested) {
+      missionRequested = true;
+      missionToken = await approveMission(goal, proposals);
+    }
+
+    for (const [i, call] of reply.tool_calls.entries()) {
+      const result = await checkPayment(missionToken, proposals[i]);
+      console.log(
+        `Yebo: ${result.decision}${result.receipt ? `  receipt ${result.receipt}` : ""}${result.reason ? `  (${result.reason})` : ""}`,
+      );
       messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
     }
   }
