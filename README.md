@@ -36,34 +36,7 @@ Prefer the terminal? `npm run dev -- demo/invoices` does the same run in the CLI
 
 ## How it works
 
-```mermaid
-flowchart LR
-  subgraph untrusted["Untrusted: anything from outside or from a model"]
-    INV["Invoice photos and PDFs"]
-    VOICE["Spoken instruction"]
-    PLAN["The agent's proposals"]
-  end
-
-  INV -->|"vision + strict JSON schema"| READ["Muse Spark 1.3<br/>reads each invoice"]
-  READ --> AUDIT["Muse Spark 1.3<br/>audits notes for hidden<br/>payment requests"]
-  VOICE --> ASR["Muse Voice Transcribe"]
-  ASR --> BRAIN
-  READ --> BRAIN["Agent brain: Muse Spark 1.3<br/>or Muse Spark Open (Baseten)<br/>tool call: propose_payment"]
-  BRAIN --> PLAN
-
-  subgraph trusted["Trusted: code and Yebo"]
-    LIMITS["Limits built in code from the invoices<br/>payees · largest invoice · total · 15 min"]
-    HUMAN["Human approves the limits<br/>(passkey at yebo.dev, or simulated in judge mode)"]
-    GATE["Yebo gateway, or the judge-mode stand-in<br/>checks every payment"]
-  end
-
-  READ --> LIMITS
-  PLAN -->|"selects invoices; can only narrow"| LIMITS
-  LIMITS --> HUMAN --> GATE
-  PLAN -->|"each payment"| GATE
-  GATE --> OUT["ALLOW + receipt ID<br/>DENY + reason<br/>REQUIRE_APPROVAL"]
-  OUT --> UI["Live timeline (web) / CLI"]
-```
+![Architecture: untrusted invoices and voice go to Meta models (Muse Spark 1.3 reads invoices and flags hidden requests, Muse Voice Transcribe, and the agent brain on Muse Spark 1.3 or Muse Spark Open proposes payments); trusted code builds the limits from the invoices, a human approves them once, and Yebo checks every payment.](docs/architecture.svg)
 
 1. **Read.** Muse Spark 1.3 reads each invoice image or PDF into JSON (payee, amount, currency, due date, invoice number, payment details, notes) under a strict JSON schema. The answer is validated: payees that look like bank details are refused, written dates are converted, and anything unusable is retried once and then rejected.
 2. **Audit.** A second Muse Spark call lists any payment requests written inside the invoices (prompt injections), with the exact quote. They are shown as red flags and never followed.

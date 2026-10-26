@@ -114,3 +114,8 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - `DEMO_SCRIPT.md`: a 3-minute demo script with timings, what to show and what to say, recorded entirely in judge mode so the video shows only hackathon-built work; pre-recording checklist, optional captions, and fallbacks.
 - `src/web/public/index.html`: the samples button starts as "Use the sample invoices" (no brief "4" before the count loads).
 - Checked from a fresh clone with only `META_API_KEY`, following the README: the web app starts in judge mode and an attack-demo run gives five ALLOW and two forced DENY with the documented reasons.
+
+## 2026-10-26 (README diagram)
+
+- Checked the README on GitHub: the Mermaid diagram rendered, but GitHub's default theme filled the two groups with pale yellow, the text was small, and GitHub's always-visible zoom buttons covered the rightmost box. Three Mermaid layouts were tried on a branch (top to bottom was 1,273 to 1,866 px tall; side by side always ran under the buttons, and the `diagramPadding` setting had no effect on GitHub).
+- Replaced it with a hand-drawn SVG, `docs/architecture.svg`: three columns (untrusted input in red, Meta models in blue, trusted code and Yebo in green), its own white card so it reads the same in GitHub light and dark mode, and a text description for screen readers. Checked on GitHub: 1000 × 360, nothing covered.
