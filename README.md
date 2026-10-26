@@ -36,7 +36,8 @@ This entire repository was created during the hackathon (Oct 26 to Nov 4, 2026).
 
 | Model | Role |
 |---|---|
-| Muse Spark (`muse-spark-1.3`) | Reads invoice images and PDFs (vision + JSON schema output), then plans payments with tool calling |
+| Muse Spark (`muse-spark-1.3`) | Reads invoice images and PDFs (vision + JSON schema output), plans payments with tool calling, and audits invoice text for hidden payment requests |
+| Muse Voice Transcribe (`muse-voice-transcribe-1.0`) | Turns a spoken instruction ("pay this week's invoices") into the agent's instruction |
 | More to come | See HACKATHON_LOG.md |
 
 ## Run it in judge mode (only a Meta API key needed)
@@ -56,6 +57,16 @@ npm run web          # then open http://127.0.0.1:3000
 ```
 
 Drop in invoices (or click **Use the 5 sample invoices**) and press **Run the agent**. You see what Muse Spark read from each invoice, the agent's plan, and the limits you are asked to approve. **Open approval page** takes you to the approval (simulated in judge mode, your passkey at yebo.dev in live mode). The live timeline then shows every payment Yebo checks, ALLOW, DENY or REQUIRE_APPROVAL, with the reason and the receipt ID. The web app runs locally only (it binds 127.0.0.1) and works in judge mode and live mode, same as the CLI.
+
+### Voice
+
+In the web app, click the microphone next to the instruction, say something like *"pay this week's invoices"*, and click it again. The browser records, converts to the 16 kHz mono WAV that Muse Voice Transcribe takes, and the transcript becomes the agent's instruction (the run starts by itself if invoices are selected). No microphone? Use **the sample voice command**, which goes through exactly the same path. From the command line:
+
+```bash
+npm run dev -- demo/invoices --voice demo/voice/pay-this-weeks-invoices.wav
+```
+
+The agent is told today's date, so "this week" selects only the invoices due this week, and the limits you approve shrink to just those invoices. To pin the date for a demo, set `YEBO_TODAY=2026-11-02` (a Monday: Brightleaf, Copperline and Ridgeback are due that week). `demo/voice/pay-this-weeks-invoices.wav` was made with the macOS `say` command; record your own to replace it.
 
 ### The attack demo
 

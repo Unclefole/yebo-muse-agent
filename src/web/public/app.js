@@ -78,6 +78,7 @@ $("use-samples").addEventListener("click", () => { hideError(); state.files = []
 function showError(text) { const e = $("upload-error"); e.textContent = text; e.hidden = false; }
 function hideError() { $("upload-error").hidden = true; }
 
+const blobToBase64 = (blob) => toBase64(blob);
 const toBase64 = (file) => new Promise((resolve, reject) => {
   const r = new FileReader();
   r.onload = () => resolve(String(r.result).split(",")[1] || "");
@@ -86,7 +87,9 @@ const toBase64 = (file) => new Promise((resolve, reject) => {
 });
 
 // ── Running ─────────────────────────────────────────────────────────────────
-$("run").addEventListener("click", async () => {
+$("run").addEventListener("click", () => startRun());
+
+async function startRun() {
   hideError();
   const run = $("run");
   run.disabled = true;
@@ -106,7 +109,102 @@ $("run").addEventListener("click", async () => {
     run.disabled = false;
     run.textContent = "Run the agent";
   }
+}
+
+// ── Voice (Muse Voice Transcribe) ───────────────────────────────────────────
+// Click to start, click again to stop (30 s at most). The browser records with
+// MediaRecorder, then decodes and downsamples to 16 kHz mono and writes a 16-bit WAV,
+// the format the transcription API takes. The server sends it to Muse Voice Transcribe.
+const VOICE_RATE = 16000;
+const MAX_RECORDING_MS = 30_000;
+const voice = { recorder: null, chunks: [], timer: null };
+
+$("mic").addEventListener("click", async () => {
+  if (voice.recorder) return voice.recorder.stop();
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const recorder = new MediaRecorder(stream);
+    voice.recorder = recorder;
+    voice.chunks = [];
+    recorder.ondataavailable = (e) => e.data.size && voice.chunks.push(e.data);
+    recorder.onstop = () => {
+      clearTimeout(voice.timer);
+      stream.getTracks().forEach((t) => t.stop());
+      voice.recorder = null;
+      $("mic").classList.remove("recording");
+      transcribeRecording(new Blob(voice.chunks, { type: recorder.mimeType }));
+    };
+    recorder.start();
+    voice.timer = setTimeout(() => recorder.state === "recording" && recorder.stop(), MAX_RECORDING_MS);
+    $("mic").classList.add("recording");
+    voiceStatus("Listening… click the microphone again when you are done.");
+  } catch (err) {
+    voiceStatus(`Microphone unavailable: ${err.message || err}`, true);
+  }
 });
+
+// The bundled sample command goes through exactly the same path as a recording.
+$("voice-sample").addEventListener("click", async () => {
+  try {
+    const res = await fetch("/api/voice-sample");
+    if (!res.ok) throw new Error(`server returned ${res.status}`);
+    transcribeRecording(await res.blob());
+  } catch (err) {
+    voiceStatus(`Could not load the sample: ${err.message || err}`, true);
+  }
+});
+
+async function transcribeRecording(blob) {
+  const mic = $("mic");
+  mic.disabled = true;
+  voiceStatus("Transcribing with Muse Voice Transcribe…");
+  try {
+    const wav = await toWav16k(blob);
+    const res = await fetch("/api/transcribe", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ audio: await blobToBase64(wav) }), // no keywords: in testing they made the model repeat words ("paypay")
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `server returned ${res.status}`);
+    $("goal").value = data.transcript;
+    const ready = state.samples || state.files.length;
+    voiceStatus(`Heard: “${data.transcript}”${ready ? "" : " Add invoices, then run the agent."}`);
+    if (ready && !$("run").disabled) startRun();
+  } catch (err) {
+    voiceStatus(`Could not transcribe: ${err.message || err}`, true);
+  } finally {
+    mic.disabled = false;
+  }
+}
+
+function voiceStatus(text, isError) {
+  const s = $("voice-status");
+  s.textContent = text;
+  s.classList.toggle("err", !!isError);
+  s.hidden = false;
+}
+
+async function toWav16k(blob) {
+  const ctx = new AudioContext();
+  const decoded = await ctx.decodeAudioData(await blob.arrayBuffer());
+  await ctx.close();
+  const length = Math.max(1, Math.ceil(decoded.duration * VOICE_RATE));
+  const offline = new OfflineAudioContext(1, length, VOICE_RATE); // mono, 16 kHz
+  const source = offline.createBufferSource();
+  source.buffer = decoded;
+  source.connect(offline.destination);
+  source.start();
+  const samples = (await offline.startRendering()).getChannelData(0);
+  const out = new DataView(new ArrayBuffer(44 + samples.length * 2));
+  const text = (offset, str) => [...str].forEach((c, i) => out.setUint8(offset + i, c.charCodeAt(0)));
+  text(0, "RIFF"); out.setUint32(4, 36 + samples.length * 2, true); text(8, "WAVE");
+  text(12, "fmt "); out.setUint32(16, 16, true); out.setUint16(20, 1, true); out.setUint16(22, 1, true);
+  out.setUint32(24, VOICE_RATE, true); out.setUint32(28, VOICE_RATE * 2, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true);
+  text(36, "data"); out.setUint32(40, samples.length * 2, true);
+  samples.forEach((v, i) => out.setInt16(44 + i * 2, Math.max(-1, Math.min(1, v)) * 0x7fff, true));
+  return new Blob([out], { type: "audio/wav" });
+}
 
 function resetRun() {
   if (state.source) state.source.close();
@@ -142,6 +240,7 @@ function finish() {
 function handle(e) {
   switch (e.type) {
     case "started":
+      step(`Instruction: “${e.goal}” · today is ${e.today}`);
       if (e.agentMode === "attack-demo") {
         step("Attack demo: payment requests hidden in the invoices will be forced through, as if the agent had been hijacked.", "attack-banner");
       }
@@ -238,7 +337,7 @@ function showMission(e) {
   $("m-per").textContent = usd(e.limits.per_payment_usd);
   $("m-total").textContent = usd(e.limits.total_usd);
   $("m-source").textContent = e.source === "invoices"
-    ? "Built from the invoices themselves, not from the agent's plan. Anything else is refused."
+    ? "Built from the invoices the agent chose to pay, never wider than the invoices themselves. Anything else is refused."
     : "Built from the agent's plan (no invoices in this run).";
   $("m-expires").textContent = new Date(e.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const link = $("approve-link");

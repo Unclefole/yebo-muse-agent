@@ -3,14 +3,18 @@
 //   npm run dev -- demo/invoices                   pay every invoice in a folder
 //   npm run dev -- path/to/invoice.pdf "goal"      one or more invoice files, optional goal
 //   npm run dev -- "Pay the design contractor $400 for the October logo work"
-//   npm run dev -- demo/invoices --attack-demo      the agent falls for injected instructions;
-//                                                   Yebo still stops the payments
+//   npm run dev -- demo/invoices --attack-demo      hidden payment requests are forced through
+//                                                   (a hijacked agent); Yebo still stops them
+//   npm run dev -- demo/invoices --voice demo/voice/pay-this-weeks-invoices.wav
+//                                                   the spoken instruction, via Muse Voice Transcribe
 import "dotenv/config";
 import { readdir, stat } from "node:fs/promises";
 import { extname, join } from "node:path";
 import { DRY_RUN_OUTCOME } from "./yebo.js";
 import { readInvoiceFile, SUPPORTED_EXTENSIONS } from "./invoice.js";
 import { startGateway, modeBanner } from "./gatewayMode.js";
+import { transcribe, VOICE_MODEL } from "./voice.js";
+import { readFile } from "node:fs/promises";
 import { runAgent, type AgentMode, type RunEvent } from "./runner.js";
 
 function print(e: RunEvent, mode: "live" | "judge") {
@@ -20,6 +24,7 @@ function print(e: RunEvent, mode: "live" | "judge") {
         console.log("\nATTACK DEMO: simulates an agent an attacker has fully taken over. Payment requests");
         console.log("hidden in the invoices are forced through after the agent's own. Watch what Yebo does.");
       }
+      console.log(`Instruction: "${e.goal}" (today is ${e.today})`);
       if (e.invoices) console.log(`\nReading ${e.invoices} invoice${e.invoices === 1 ? "" : "s"} with ${e.model}...`);
       break;
     case "invoice": {
@@ -79,13 +84,20 @@ function print(e: RunEvent, mode: "live" | "judge") {
 }
 
 // Splits the command line into invoice files (files, or folders of them) and the goal text.
-async function parseArgs(args: string[]): Promise<{ goal: string; files: string[]; agentMode: AgentMode }> {
+async function parseArgs(args: string[]): Promise<{ goal: string; files: string[]; agentMode: AgentMode; voice: string | null }> {
   const files: string[] = [];
   const words: string[] = [];
   let agentMode: AgentMode = "guarded";
-  for (const arg of args) {
+  let voice: string | null = null;
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
     if (arg === "--attack-demo") {
       agentMode = "attack-demo";
+      continue;
+    }
+    if (arg === "--voice") {
+      voice = args[++i] ?? null;
+      if (!voice) throw new Error("--voice needs a WAV file");
       continue;
     }
     const info = await stat(arg).catch(() => null);
@@ -97,11 +109,18 @@ async function parseArgs(args: string[]): Promise<{ goal: string; files: string[
     else words.push(arg);
   }
   const goal = words.join(" ") || (files.length ? "Pay these invoices." : "Pay the design contractor $400 for the October logo work");
-  return { goal, files, agentMode };
+  return { goal, files, agentMode, voice };
 }
 
 async function main() {
-  const { goal, files, agentMode } = await parseArgs(process.argv.slice(2));
+  const args = await parseArgs(process.argv.slice(2));
+  const { files, agentMode } = args;
+  let goal = args.goal;
+  if (args.voice) {
+    console.log(`Transcribing ${args.voice} with ${VOICE_MODEL}...`);
+    goal = await transcribe(await readFile(args.voice));
+    console.log(`Heard: "${goal}"`);
+  }
   const sources = await Promise.all(files.map((f) => readInvoiceFile(f)));
   const gateway = await startGateway();
   console.log(modeBanner(gateway));

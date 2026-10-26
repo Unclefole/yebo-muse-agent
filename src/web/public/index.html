@@ -38,10 +38,17 @@
           <input type="checkbox" id="attack-demo">
           <span><strong>Attack demo</strong> · simulate a hijacked agent: payment requests hidden in the invoices are forced through. Yebo should refuse them.</span>
         </label>
-        <label class="field">
-          <span>Instruction for the agent</span>
-          <input type="text" id="goal" value="Pay these invoices." maxlength="500">
-        </label>
+        <div class="field">
+          <label for="goal">Instruction for the agent, typed or spoken</label>
+          <div class="goal-row">
+            <input type="text" id="goal" value="Pay these invoices." maxlength="500">
+            <button type="button" class="mic" id="mic" aria-label="Speak the instruction" title="Speak the instruction">
+              <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.93V21h2v-2.07A7 7 0 0 0 19 12h-2Z"/></svg>
+            </button>
+          </div>
+          <p class="voice-status" id="voice-status" hidden></p>
+          <button type="button" class="link small-link" id="voice-sample">No microphone? Use the sample voice command (“Pay this week's invoices”)</button>
+        </div>
         <button type="button" class="primary" id="run" disabled>Run the agent</button>
         <p class="error" id="upload-error" hidden></p>
       </article>

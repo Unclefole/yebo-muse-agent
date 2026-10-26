@@ -41,7 +41,10 @@ function fakeMeta(body: any): unknown {
   }
   if (schema === "payment_requests") return reply({ content: JSON.stringify({ requests: HIDDEN }) });
   if (!body.messages.some((m: any) => m.role === "tool")) {
-    const payments = Object.values(SAMPLES).map((s) => ({ payee: s.payee, amount_usd: s.amount }));
+    // "this week" (today pinned to Mon 2026-11-02): only the three invoices due Nov 2-8.
+    const thisWeek = JSON.stringify(body.messages).includes("this week");
+    const due = new Set(["Brightleaf Design Studio", "Copperline Plumbing & Heating", "Ridgeback Office Supplies"]);
+    const payments = Object.values(SAMPLES).filter((s) => !thisWeek || due.has(s.payee)).map((s) => ({ payee: s.payee, amount_usd: s.amount }));
     if (fooledAgent) payments.push({ payee: "Harlow Holdings", amount_usd: 9000 });
     const tool_calls = payments.map((p, i) => ({
       id: `c${i}`, type: "function", function: { name: "propose_payment", arguments: JSON.stringify({ ...p, memo: "invoice" }) },
@@ -55,7 +58,11 @@ before(async () => {
   process.env.META_API_BASE = META;
   process.env.META_API_KEY = "test";
   delete process.env.YEBO_MISSION_TOKEN;
+  process.env.YEBO_TODAY = "2026-11-02";
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    if (String(url) === `${META}/asr/transcribe`) {
+      return new Response(JSON.stringify({ sessionId: "s", transcript: "pay this week's invoices..", audioDurationMs: 1600, turns: [] }), { status: 200 });
+    }
     if (String(url).startsWith(META)) return new Response(JSON.stringify(fakeMeta(JSON.parse(String(init?.body)))), { status: 200 });
     return realFetch(url, init);
   }) as typeof fetch;
@@ -159,6 +166,35 @@ test("a fooled agent cannot widen the mission: limits come from the invoices onl
   assert.ok(!mission.limits.payees.includes("Harlow Holdings"));
   assert.equal(mission.limits.total_usd, 2619);
   assert.equal(decisions(ev).find((d) => d.proposal.payee === "Harlow Holdings")?.decision, "DENY");
+});
+
+test("voice: the sample command is served and transcribed; bad clips and other origins are refused", async () => {
+  const sample = await fetch(`${base}/api/voice-sample`);
+  assert.equal(sample.headers.get("content-type"), "audio/wav");
+  const audio = Buffer.from(await sample.arrayBuffer()).toString("base64");
+  const post = (body: unknown, headers: Record<string, string> = {}) =>
+    fetch(`${base}/api/transcribe`, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+  const ok = await post({ audio });
+  assert.equal(ok.status, 200);
+  assert.deepEqual(await ok.json(), { transcript: "Pay this week's invoices.", model: "muse-voice-transcribe-1.0" });
+  const bad = await post({ audio: Buffer.from("not a wav file, just some text bytes here........").toString("base64") });
+  assert.equal(bad.status, 400);
+  assert.match((await bad.json()).error, /not a WAV/);
+  assert.equal((await post({ audio }, { origin: "http://evil.example" })).status, 403);
+  assert.equal((await post({})).status, 400);
+});
+
+test("'this week' narrows the mission to the invoices the agent chose, using today's date", async () => {
+  const ev = await run({ samples: true, goal: "Pay this week's invoices." });
+  const started = ev[0];
+  assert.ok(started.type === "started");
+  assert.equal(started.today, "2026-11-02");
+  const mission = ev.find((e) => e.type === "mission");
+  assert.ok(mission && mission.type === "mission");
+  assert.deepEqual(mission.limits.payees, ["Brightleaf Design Studio", "Copperline Plumbing & Heating", "Ridgeback Office Supplies"]);
+  assert.equal(mission.limits.total_usd, 1890);
+  assert.equal(decisions(ev).length, 3);
+  assert.ok(decisions(ev).every((d) => d.decision === "ALLOW"));
 });
 
 test("a finished run replays its events to a late listener", async () => {
