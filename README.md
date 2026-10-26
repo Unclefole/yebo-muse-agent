@@ -37,32 +37,40 @@ Prefer the terminal? `npm run dev -- demo/invoices` does the same run in the CLI
 ## How it works
 
 ```mermaid
-flowchart TB
-  subgraph untrusted["Untrusted: from outside, or from a model"]
-    direction LR
+flowchart LR
+  subgraph untrusted["Untrusted input"]
+    direction TB
     INV["Invoice photos and PDFs"]
     VOICE["Spoken instruction"]
   end
 
-  INV -->|"vision + strict JSON schema"| READ["Muse Spark 1.3 reads each invoice"]
-  READ --> AUDIT["Muse Spark 1.3 flags hidden payment requests"]
-  VOICE --> ASR["Muse Voice Transcribe"]
-  ASR --> BRAIN["Agent brain: Muse Spark 1.3 or Muse Spark Open<br/>proposes payments (tool calls)"]
-  READ --> BRAIN
-
-  subgraph trusted["Trusted: code and Yebo"]
-    LIMITS["Limits built in code from the invoices<br/>payees · largest invoice · total · 15 min"]
-    HUMAN["Human approves the limits once<br/>passkey at yebo.dev, or simulated in judge mode"]
-    GATE["Yebo gateway, or the judge-mode stand-in,<br/>checks every payment"]
-    LIMITS --> HUMAN --> GATE
+  subgraph meta["Meta models"]
+    direction TB
+    READ["Muse Spark 1.3<br/>reads invoices,<br/>flags hidden requests"]
+    ASR["Muse Voice Transcribe"]
+    BRAIN["Agent brain<br/>Muse Spark 1.3 or Open<br/>proposes payments"]
   end
 
+  subgraph trusted["Trusted: code and Yebo"]
+    direction TB
+    LIMITS["Limits built from<br/>the invoices"]
+    HUMAN["Human approves<br/>the limits once"]
+    GATE["Yebo checks<br/>every payment"]
+  end
+
+  OUT["ALLOW · DENY<br/>REQUIRE_APPROVAL<br/>+ reason, receipt"]
+
+  INV --> READ
+  VOICE --> ASR --> BRAIN
+  READ --> BRAIN
   READ --> LIMITS
-  BRAIN -->|"chooses invoices: can only narrow"| LIMITS
-  BRAIN -->|"each proposed payment"| GATE
-  GATE --> OUT["ALLOW + receipt ID · DENY + reason · REQUIRE_APPROVAL<br/>shown live in the timeline"]
+  BRAIN -.->|"can only narrow"| LIMITS
+  LIMITS --> HUMAN --> GATE
+  BRAIN -->|"each payment"| GATE
+  GATE --> OUT
 
   style untrusted fill:#fdecee,stroke:#e5484d,color:#111
+  style meta fill:#eef3ff,stroke:#5b7fd6,color:#111
   style trusted fill:#e6f9ef,stroke:#16a36a,color:#111
 ```
 
