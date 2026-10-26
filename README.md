@@ -37,6 +37,7 @@ This entire repository was created during the hackathon (Oct 26 to Nov 4, 2026).
 | Model | Role |
 |---|---|
 | Muse Spark (`muse-spark-1.3`) | Reads invoice images and PDFs (vision + JSON schema output), plans payments with tool calling, and audits invoice text for hidden payment requests |
+| Muse Spark Open (`meta-models/muse-spark-open`, open weights, via Baseten) | Optional agent brain for planning and tool calling (`--open`, or "Agent brain" in the web app) |
 | Muse Voice Transcribe (`muse-voice-transcribe-1.0`) | Turns a spoken instruction ("pay this week's invoices") into the agent's instruction |
 | More to come | See HACKATHON_LOG.md |
 
@@ -67,6 +68,16 @@ npm run dev -- demo/invoices --voice demo/voice/pay-this-weeks-invoices.wav
 ```
 
 The agent is told today's date, so "this week" selects only the invoices due this week, and the limits you approve shrink to just those invoices. To pin the date for a demo, set `YEBO_TODAY=2026-11-02` (a Monday: Brightleaf, Copperline and Ridgeback are due that week). `demo/voice/pay-this-weeks-invoices.wav` was made with the macOS `say` command; record your own to replace it.
+
+### Muse Spark Open (open weights)
+
+The agent's planning and tool calls can run on **Muse Spark Open**, the open-weight release of Muse Spark, served by Baseten. Invoice reading and the hidden-request audit stay on Muse Spark through the Meta Model API, because they rely on strict JSON-schema output, which Baseten does not offer for Muse Spark Open.
+
+1. Add `BASETEN_API_KEY=...` to `.env` (Baseten → Settings → API keys).
+2. `npm run check-open` checks the key, lists the Muse models your account can use, and tries a test tool call.
+3. `npm run dev -- demo/invoices --open`, or choose **Muse Spark Open** under "Agent brain" in the web app.
+
+Settings follow Meta's recommendations (temperature 1.0, top_p 1.0); reasoning effort is `medium` (change with `MUSE_SPARK_OPEN_REASONING_EFFORT`), and the model name can be changed with `MUSE_SPARK_OPEN_MODEL`.
 
 ### The attack demo
 

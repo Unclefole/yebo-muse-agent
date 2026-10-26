@@ -23,6 +23,14 @@ async function init() {
     mode.textContent = cfg.mode === "judge" ? "Judge mode · local gateway" : "Live · Yebo gateway";
     if (cfg.mode !== "judge") mode.classList.add("live");
     $("model-badge").textContent = cfg.model;
+    $("brain-spark").textContent = `${cfg.model} · Meta Model API`;
+    if (cfg.openAvailable) {
+      $("brain-open-note").textContent = `${cfg.openModel} · open weights, via Baseten`;
+    } else {
+      $("brain-open").disabled = true;
+      $("brain-open-label").classList.add("off");
+      $("brain-open-note").textContent = "add BASETEN_API_KEY to .env to use it";
+    }
     $("foot").textContent = cfg.mode === "judge"
       ? "Judge mode: payments are checked by a local stand-in for the Yebo gateway that enforces the same mission rules. Approval is simulated; the live flow uses your passkey at yebo.dev. Dry run: no money moves."
       : `Live mode: payments are checked by the Yebo gateway (${cfg.gateway}). You approve the limits with your passkey. Dry run: no money moves.`;
@@ -95,7 +103,8 @@ async function startRun() {
   run.disabled = true;
   run.textContent = "Starting…";
   try {
-    const body = { goal: $("goal").value, attackDemo: $("attack-demo").checked };
+    const brain = document.querySelector('input[name="brain"]:checked')?.value || "muse-spark";
+    const body = { goal: $("goal").value, attackDemo: $("attack-demo").checked, brain };
     if (state.samples) body.samples = true;
     else body.files = await Promise.all(state.files.map(async (f) => ({ name: f.name, data: await toBase64(f) })));
     const res = await fetch("/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
@@ -222,7 +231,7 @@ function listen(id) {
   source.onmessage = (msg) => {
     const e = JSON.parse(msg.data);
     if (e.type === "planning") {
-      if (!planningShown) { planningShown = true; step("Muse Spark is planning the payments…"); }
+      if (!planningShown) { planningShown = true; step("The agent is planning the payments…"); }
       return;
     }
     handle(e);
@@ -241,10 +250,12 @@ function handle(e) {
   switch (e.type) {
     case "started":
       step(`Instruction: “${e.goal}” · today is ${e.today}`);
+      step(`Agent brain: ${e.brainLabel} (${e.model})`);
+      $("model-badge").textContent = e.brain === "muse-spark-open" ? `${e.model} (open)` : e.model;
       if (e.agentMode === "attack-demo") {
         step("Attack demo: payment requests hidden in the invoices will be forced through, as if the agent had been hijacked.", "attack-banner");
       }
-      step(e.invoices ? `Reading ${e.invoices} invoice${e.invoices === 1 ? "" : "s"} with ${e.model}` : `Planning with ${e.model}`);
+      if (e.invoices) step(`Reading ${e.invoices} invoice${e.invoices === 1 ? "" : "s"} with ${e.readerModel}`);
       break;
     case "invoice": return addInvoice(e.invoice);
     case "invoice_error": return addInvoiceError(e.file, e.error);

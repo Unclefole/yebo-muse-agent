@@ -149,3 +149,11 @@ dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .voice-status { margin: 6px 0 0; font-size: 13px; color: var(--ink-2); overflow-wrap: anywhere; }
 .voice-status.err { color: var(--red); }
 .small-link { font-size: 12px; padding: 6px 0 0; text-align: left; }
+
+/* Phase 5: choose the agent brain */
+.brain { border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; margin: 6px 0 12px; display: grid; gap: 6px; }
+.brain legend { font-size: 12px; color: var(--muted); padding: 0 6px; }
+.brain label { display: flex; gap: 10px; align-items: center; font-size: 14px; cursor: pointer; }
+.brain input { accent-color: var(--green); }
+.brain small { color: var(--muted); font-size: 12px; margin-left: 4px; }
+.brain label.off { opacity: .55; cursor: not-allowed; }

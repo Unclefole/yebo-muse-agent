@@ -42,25 +42,77 @@ export function model(): string {
   return process.env.META_MODEL || DEFAULT_MODEL;
 }
 
-async function complete(body: Record<string, unknown>): Promise<Message> {
-  const base = process.env.META_API_BASE || "https://api.meta.ai/v1";
-  const key = process.env.META_API_KEY;
-  if (!key) throw new Error("META_API_KEY is not set");
+// Which model drives the agent's planning and tool calls ("the brain").
+//   muse-spark       Muse Spark on the Meta Model API (META_API_KEY), the default
+//   muse-spark-open  Muse Spark Open, Meta's open-weight release, served by Baseten
+//                    (BASETEN_API_KEY). Checked against dev.meta.ai/docs/muse-spark-open
+//                    and docs.baseten.co on 2026-10-26: OpenAI-compatible
+//                    https://inference.baseten.co/v1, Authorization: Bearer, model
+//                    "meta-models/muse-spark-open", tool calling supported, structured
+//                    output NOT supported, recommended temperature 1.0 and top_p 1.0.
+// Invoice reading and the hidden-request audit use strict JSON schemas, so they always run
+// on Muse Spark through the Meta Model API.
+export type Brain = "muse-spark" | "muse-spark-open";
 
-  const res = await fetch(`${base}/chat/completions`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model: model(), ...body }),
-  });
-  if (!res.ok) throw new Error(`Meta API ${res.status}: ${await res.text()}`);
+export const OPEN_DEFAULT_MODEL = "meta-models/muse-spark-open";
+
+type Endpoint = { base: string; key: string | undefined; keyName: string; model: string; label: string; extra: Record<string, unknown> };
+
+export function endpoint(brain: Brain = "muse-spark"): Endpoint {
+  if (brain === "muse-spark-open") {
+    const effort = process.env.MUSE_SPARK_OPEN_REASONING_EFFORT || "medium"; // docs' default is xhigh (slow)
+    return {
+      base: process.env.BASETEN_API_BASE || "https://inference.baseten.co/v1",
+      key: process.env.BASETEN_API_KEY,
+      keyName: "BASETEN_API_KEY",
+      model: process.env.MUSE_SPARK_OPEN_MODEL || OPEN_DEFAULT_MODEL,
+      label: "Muse Spark Open (open weights, via Baseten)",
+      extra: { temperature: 1.0, top_p: 1.0, ...(effort === "default" ? {} : { reasoning_effort: effort }) },
+    };
+  }
+  return {
+    base: process.env.META_API_BASE || "https://api.meta.ai/v1",
+    key: process.env.META_API_KEY,
+    keyName: "META_API_KEY",
+    model: model(),
+    label: "Muse Spark (Meta Model API)",
+    extra: {},
+  };
+}
+
+export function openAvailable(): boolean {
+  return !!process.env.BASETEN_API_KEY;
+}
+
+async function complete(body: Record<string, unknown>, brain: Brain = "muse-spark"): Promise<Message> {
+  const ep = endpoint(brain);
+  if (!ep.key) throw new Error(`${ep.keyName} is not set`);
+  const who = brain === "muse-spark-open" ? "Baseten (Muse Spark Open)" : "Meta API";
+  const send = (payload: Record<string, unknown>) =>
+    fetch(`${ep.base}/chat/completions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${ep.key}` },
+      body: JSON.stringify(payload),
+    });
+  const payload = { model: ep.model, ...ep.extra, ...body };
+  let res = await send(payload);
+  // If the provider does not accept reasoning_effort, retry once without it.
+  if (res.status === 400 && "reasoning_effort" in payload) {
+    const text = await res.text();
+    if (!/reasoning/i.test(text)) throw new Error(`${who} 400: ${text}`);
+    const { reasoning_effort: _dropped, ...rest } = payload;
+    res = await send(rest);
+  }
+  if (!res.ok) throw new Error(`${who} ${res.status}: ${await res.text()}`);
   const data = await res.json();
   const message = data?.choices?.[0]?.message;
-  if (!message) throw new Error("Meta API returned no message");
+  if (!message) throw new Error(`${who} returned no message`);
   return message as Message;
 }
 
-export async function chat(messages: Message[], tools: Tool[]): Promise<Message> {
-  return complete({ messages, tools, tool_choice: "auto" });
+export async function chat(messages: Message[], tools: Tool[], brain: Brain = "muse-spark"): Promise<Message> {
+  // Only send tools when there are some: Baseten rejects tool_choice without tools.
+  return complete({ messages, ...(tools.length ? { tools, tool_choice: "auto" } : {}) }, brain);
 }
 
 // One structured answer, constrained to `format`. Returns the raw JSON text.
