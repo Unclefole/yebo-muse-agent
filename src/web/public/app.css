@@ -121,3 +121,19 @@ dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .agent-msg p { white-space: pre-wrap; margin: 8px 0 0; }
 
 .foot { max-width: 1160px; margin: 0 auto; padding: 8px 16px 32px; color: var(--muted); font-size: 12px; }
+
+/* Phase 3: attack demo */
+.toggle { display: flex; gap: 10px; align-items: flex-start; margin: 6px 0 12px; font-size: 13px; color: var(--ink-2); cursor: pointer; }
+.toggle input { margin-top: 3px; accent-color: var(--red); }
+.toggle strong { color: var(--red); }
+.small { font-size: 12px; margin: -4px 0 10px; }
+.alert-card { border-color: rgba(255, 93, 108, 0.45); }
+.step.alert { background: var(--red-soft); color: var(--red); border-color: rgba(255, 93, 108, 0.5); }
+.hidden-list { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
+.hidden-list li { padding: 10px 12px; border-radius: 10px; background: var(--red-soft); font-size: 14px; overflow-wrap: anywhere; }
+.hidden-list .quote { display: block; color: var(--ink-2); font-size: 13px; margin-top: 4px; font-style: italic; }
+.hidden-list .from { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.flag { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .04em; padding: 1px 7px; border-radius: 6px; margin-left: 6px; color: var(--red); background: var(--red-soft); vertical-align: 1px; }
+.plan li.forced { color: var(--red); }
+.timeline li.attack-banner { border-color: rgba(255, 93, 108, 0.5); border-style: solid; }
+.timeline li.attack-banner .what { color: var(--red); }

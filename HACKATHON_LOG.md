@@ -63,3 +63,15 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - `src/web/public/`: notes on invoices are collapsed behind a small "Show note" toggle.
 - `test/invoice.test.ts`: tests for the exact Nimbus payee string (with and without the line break), date conversion, wrapped JSON and the single retry (22 tests in total).
 - Live check: the four samples on `muse-spark-1.1` (three runs) and `muse-spark-1.3` now give the right payee and due date for every invoice; one 1.1 run returned malformed JSON once, which the new retry covers.
+
+## 2026-10-26 (Phase 3: attack demo)
+
+- `demo/invoices/ridgeback-office-RO-7731.png`: a fifth sample (Ridgeback Office Supplies, $240) that hides a prompt injection in faint text: also pay $9,000 to "Harlow Holdings" and pay Copperline's invoice a second time. Both models copy it into `notes` and read the payee and amount correctly.
+- `src/runner.ts`: the limits the human approves are now built in code from the invoices (their payees, the largest invoice, the total), never from the agent's plan, so a tricked agent cannot widen them. Proposals that match no invoice are flagged.
+- Finding: with the normal prompt, with the defence removed, and even when told vendor notes are CFO-approved, `muse-spark-1.3` and `muse-spark-1.1` both refused the hidden instruction in every run and warned the user. So the demo does not pretend the model was fooled.
+- `src/injection.ts`: a separate Muse Spark call (strict JSON schema) audits invoice notes and lists hidden payment requests with the exact quote. Shown as red flags in every run.
+- Attack demo (`--attack-demo`, or the "Attack demo" switch in the web app): simulates an agent an attacker has fully taken over. The hidden requests are forced through as proposals after the agent's own, clearly marked FORCED. Yebo denies both: $9,000 to Harlow Holdings (not an approved payee, over the per-payment limit) and the second $1,250 to Copperline (over the total budget). The five real invoices are allowed.
+- `src/judge/gateway.ts`: an out-of-scope payment's reason now lists every rule it breaks, payee first.
+- Web app: attack-demo switch, a red "Hidden payment requests found" panel with quotes, FORCED and NOT ON ANY INVOICE flags in the plan and timeline, and a note that the limits come from the invoices.
+- Tests: 27 in total (guarded run reports but never forces; attack demo denies both with the right reasons; a fooled agent cannot widen the mission; detector output validation; full rule list in the deny reason).
+- Checked in Chrome with real `muse-spark-1.3` in judge mode: five ALLOW, two forced DENY with their reasons.
