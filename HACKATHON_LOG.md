@@ -31,3 +31,16 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - `src/yebo.ts`: `checkPayment()` now returns an `outcome` in plain words; an ALLOW is "approved (dry run, no money moved)".
 - `src/agent.ts`: the model gets the decision and that outcome instead of the gateway's raw response, which says `executed: true` even in dry run. The system prompt tells it never to say executed, sent, paid or transferred.
 - `src/agent.ts`: each run ends with a summary printed by the code, not the model, so the final word on each payment is always accurate.
+
+## 2026-10-26 (Phase 1: invoice reading + judge mode)
+
+- Checked the Meta Model API docs (dev.meta.ai/docs) before building: base URL `https://api.meta.ai/v1`, Bearer auth, Chat Completions `image_url` and `file` content parts, `response_format` `json_schema`. `muse-spark-1.3` is the docs' recommended model and accepts images and PDFs. Confirmed the shapes with live calls.
+- `src/muse.ts`: image and PDF content parts and structured output (`structured()`); default model is now `muse-spark-1.3`.
+- `src/invoice.ts`: reads an invoice image (PNG, JPEG, GIF, WebP) or PDF with Muse Spark vision and returns payee, amount, currency, due date, invoice number, payment details and any notes as JSON, constrained by a strict JSON schema and validated (fail closed). Invoice text is treated as untrusted data.
+- `demo/invoices/`: four sample invoices from fictional businesses (two PNGs, a tilted phone-style JPEG, a PDF), made by `demo/make_invoices.py`.
+- `src/judge/`: judge mode, a local stand-in for the Yebo gateway written for this repo (no gateway code). Same signed protocol and the same mission rules: allowed payees, per-payment limit, total budget, expiry, fail closed. Approval is simulated on a local page (no passkey) and every payment is a dry run.
+- `src/gatewayMode.ts`: judge mode starts automatically when `YEBO_HMAC_SECRET` is empty (or `YEBO_MODE=judge`), so the repo runs with only a Meta API key.
+- `src/agent.ts`: `npm run dev -- demo/invoices` reads the invoices, proposes one payment per invoice, asks for one mission covering them, waits for approval, then checks each payment. Malformed tool calls from the model are refused before they reach the gateway.
+- `src/extract.ts`: `npm run extract` prints the extracted invoice JSON.
+- `test/`: 15 tests (`npm test`) for the judge gateway rules (through the real client) and invoice reading (Meta API mocked).
+- Live check: all four sample invoices extracted correctly by `muse-spark-1.3` (about 14 s for four), and a full judge-mode run proposed four payments, got one mission approved on the local page, and returned ALLOW with a receipt for each, dry run.

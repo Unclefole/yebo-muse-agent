@@ -2,10 +2,12 @@
   "name": "yebo-muse-agent",
   "version": "0.1.0",
   "private": true,
-  "description": "A Meta Muse Spark agent that proposes payments; Yebo authorizes them before anything runs.",
+  "description": "Yebo AP Agent: Muse Spark reads invoices and proposes payments; Yebo authorizes each one before anything runs.",
   "type": "module",
   "scripts": {
     "dev": "tsx src/agent.ts",
+    "extract": "tsx src/extract.ts",
+    "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
