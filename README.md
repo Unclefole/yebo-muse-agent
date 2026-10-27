@@ -28,7 +28,9 @@ npm run web                                    # open http://127.0.0.1:3000
 2. Click **Open approval page (simulated)**, then **Approve limits**.
 3. Watch the live timeline: five **ALLOW** with receipt IDs.
 4. Tick **Attack demo** and run again: the two hidden payment requests are forced through and Yebo **DENY**s both.
-5. Click the microphone (or **the sample voice command**) and say *"pay this week's invoices"*.
+5. Click the microphone (or **the sample voice command**) and say *"pay this week's invoices"*. "This week" depends on today's date; to get the demo's result (Brightleaf, Copperline and Ridgeback), start the app with the date pinned: `YEBO_TODAY=2026-11-02 npm run web`.
+
+Port 3000 or 4400 already in use? Pick others: `WEB_PORT=3001 YEBO_JUDGE_PORT=4401 npm run web`.
 
 **Judge mode** starts automatically when `YEBO_HMAC_SECRET` is empty. A local stand-in for the Yebo gateway (`src/judge/`, written for this repo, not the real gateway) enforces the same mission rules: allowed payees, per-payment limit, total budget, expiry, signed requests, fail closed. Approval is a simulated button instead of a passkey. Every payment is a dry run: **no money moves, ever**.
 
