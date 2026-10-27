@@ -168,3 +168,8 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - `src/runner.ts`: a proposal with the same payee, amount and invoice number (read from its memo; the longest matching number, so NH-88317-R is not NH-88317) as one recorded in an earlier turn is not recorded again, and a turn of only repeats ends planning. Without invoices the memo text is used. Two invoices from one vendor for the same amount still count separately.
 - Tests: 61 (a model that repeats its whole plan; two same-amount invoices from one vendor across turns).
 - Live after the fix: 7-invoice set 5 runs: 4 × (7 proposed, 5 ALLOW, 2 DENY), 1 × (6 proposed: Muse skipped the superseded Nimbus copy itself; 5 ALLOW, 1 DENY). Normal 5 ALLOW, voice 3 ALLOW, attack demo 5 ALLOW + 2 forced DENY.
+
+## 2026-10-27 (overnight: fresh-clone test)
+
+- Cloned the repo into a temp folder and followed the README with only `META_API_KEY` in `.env` (Node 22.17.1): `npm ci` (0 vulnerabilities), `npm run web`, the 5 samples (5 ALLOW), the attack demo (5 ALLOW, 2 forced DENY), the sample voice file served, `npm run dev -- demo/invoices` (5 ALLOW), `npm test` (61 pass).
+- Two README gaps found and fixed: "pay this week's invoices" depends on the real date (on Oct 27 it would pick only Nimbus), so step 5 now says how to pin it (`YEBO_TODAY=2026-11-02`); and the app fails with EADDRINUSE when port 3000 or 4400 is taken (it was during the test), so the README now shows `WEB_PORT` / `YEBO_JUDGE_PORT`.
