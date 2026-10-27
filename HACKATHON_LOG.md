@@ -179,3 +179,9 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - Checked the layout below 860 px. Chrome would not size the window below about 578 px here and the app forbids framing (`frame-ancestors 'none'`), so phone widths were emulated in the live page (body at 390 and 360 px with the one-column rules applied) after a full attack-demo run: one column, nothing wider than the screen, no yellow anywhere (app CSS and the judge approval page only use green, red, blue and greys).
 - Two small CSS fixes in `src/web/public/app.css`: a DENY's reason is now `--ink-2` at 14 px instead of muted grey at 13 px, so it reads clearly on screen; under 520 px the timeline's time goes above each entry instead of taking about a third of the width.
 - Live (judge mode, attack demo): DENY reasons render at 14 px in the brighter colour, ALLOW notes unchanged, no horizontal overflow, 5 ALLOW + 2 forced DENY. 61 tests pass.
+
+## 2026-10-27 (overnight: one-click demo set)
+
+- Web app: a "Use the demo set (7 invoices)" link next to "Use the 5 sample invoices". It loads the 5 samples plus two labelled test invoices from `demo/fixtures/` (`test-account-mismatch-LL-3104.png`, `test-reissued-NH-88317-R.png`), so the video's run can be reproduced in one click. `POST /api/runs` takes `samples: "demo-set"`; `/api/samples` also lists the demo set; the link is hidden if a file is missing.
+- Test: a demo-set run through the real web server and judge gateway (7 invoices read; both test invoices left out of the limits; 5 ALLOW; DENY for Larkspur "not in the approved mission" and for the second Nimbus "exceeds the budget left (0)"). The web test's fake planner now proposes only the invoices the run read. 62 tests.
+- Live (judge mode, Muse Spark 1.3, unforced): the same result in the browser.

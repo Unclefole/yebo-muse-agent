@@ -58,6 +58,7 @@ h2 { font-size: 16px; margin: 0 0 14px; display: flex; gap: 10px; align-items: c
 .chips { list-style: none; padding: 0; margin: 12px 0 0; display: flex; flex-wrap: wrap; gap: 8px; }
 .chips li { display: flex; gap: 8px; align-items: center; background: var(--card-2); border: 1px solid var(--line); border-radius: 999px; padding: 4px 6px 4px 12px; font-size: 13px; max-width: 100%; }
 .chips li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sample-links { display: flex; flex-wrap: wrap; gap: 4px 18px; }
 .chips button { border: 0; background: transparent; color: var(--muted); cursor: pointer; font-size: 16px; line-height: 1; padding: 2px 6px; }
 
 button, .button { font: inherit; }

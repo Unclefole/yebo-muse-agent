@@ -13,7 +13,8 @@ const el = (tag, cls, text) => {
 const usd = (n) => `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const clock = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
-const state = { files: [], samples: false, sampleNames: [], mode: "judge", source: null, results: [] };
+// samples: false (uploaded files), true (the samples) or "demo-set" (the samples plus two test invoices)
+const state = { files: [], samples: false, sampleNames: [], demoSetNames: [], mode: "judge", source: null, results: [] };
 
 async function init() {
   try {
@@ -34,9 +35,13 @@ async function init() {
     $("foot").textContent = cfg.mode === "judge"
       ? "Judge mode: payments are checked by a local stand-in for the Yebo gateway that enforces the same mission rules. Approval is simulated; the live flow uses your passkey at yebo.dev. Dry run: no money moves."
       : `Live mode: payments are checked by the Yebo gateway (${cfg.gateway}). You approve the limits with your passkey. Dry run: no money moves.`;
-    state.sampleNames = (await (await fetch("/api/samples")).json()).samples || [];
+    const listed = await (await fetch("/api/samples")).json();
+    state.sampleNames = listed.samples || [];
+    state.demoSetNames = listed.demoSet || [];
     $("use-samples").textContent = `Use the ${state.sampleNames.length} sample invoices`;
     if (!state.sampleNames.length) $("use-samples").hidden = true;
+    $("use-demo-set").textContent = `Use the demo set (${state.demoSetNames.length} invoices)`;
+    $("use-demo-set").hidden = !state.demoSetNames.length;
   } catch {
     showError("Could not reach the local server.");
   }
@@ -59,7 +64,7 @@ function addFiles(list) {
 function renderChips() {
   const chips = $("chips");
   chips.replaceChildren();
-  const names = state.samples ? state.sampleNames : state.files.map((f) => f.name);
+  const names = state.samples === "demo-set" ? state.demoSetNames : state.samples ? state.sampleNames : state.files.map((f) => f.name);
   names.forEach((name, i) => {
     const li = el("li");
     li.append(el("span", "", name));
@@ -82,6 +87,7 @@ drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.ad
 drop.addEventListener("dragleave", () => drop.classList.remove("over"));
 drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); hideError(); addFiles(e.dataTransfer.files); });
 $("use-samples").addEventListener("click", () => { hideError(); state.files = []; state.samples = true; renderChips(); });
+$("use-demo-set").addEventListener("click", () => { hideError(); state.files = []; state.samples = "demo-set"; renderChips(); });
 
 function showError(text) { const e = $("upload-error"); e.textContent = text; e.hidden = false; }
 function hideError() { $("upload-error").hidden = true; }
@@ -105,7 +111,7 @@ async function startRun() {
   try {
     const brain = document.querySelector('input[name="brain"]:checked')?.value || "muse-spark";
     const body = { goal: $("goal").value, attackDemo: $("attack-demo").checked, brain };
-    if (state.samples) body.samples = true;
+    if (state.samples) body.samples = state.samples;
     else body.files = await Promise.all(state.files.map(async (f) => ({ name: f.name, data: await toBase64(f) })));
     const res = await fetch("/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const data = await res.json();

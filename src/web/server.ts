@@ -18,6 +18,10 @@ import { transcribe, VOICE_MODEL } from "../voice.js";
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(HERE, "public");
 const SAMPLES = join(HERE, "..", "..", "demo", "invoices");
+const FIXTURES = join(HERE, "..", "..", "demo", "fixtures");
+// The demo set (the video's run): the 5 samples plus two labelled test invoices, a known
+// vendor with an account not on file and the Nimbus bill reissued under a new number.
+const DEMO_SET_EXTRAS = ["test-account-mismatch-LL-3104.png", "test-reissued-NH-88317-R.png"];
 const VOICE_SAMPLE = join(HERE, "..", "..", "demo", "voice", "pay-this-weeks-invoices.wav");
 
 const MAX_FILES = 10;
@@ -70,7 +74,7 @@ export class WebApp {
         openAvailable: openAvailable(), openModel: endpoint("muse-spark-open").model,
       });
     }
-    if (req.method === "GET" && path === "/api/samples") return json(res, 200, { samples: await sampleNames() });
+    if (req.method === "GET" && path === "/api/samples") return json(res, 200, { samples: await sampleNames(), demoSet: (await demoSet()).map((s) => s.name) });
     const sample = path.match(/^\/api\/samples\/([A-Za-z0-9._-]+)$/);
     if (req.method === "GET" && sample) {
       const names = await sampleNames();
@@ -150,6 +154,11 @@ export class WebApp {
       const names = await sampleNames();
       return { list: await Promise.all(names.map(async (name) => ({ name, data: await readFile(join(SAMPLES, name)) }))) };
     }
+    if (body.samples === "demo-set") {
+      const set = await demoSet();
+      if (!set.length) return { error: "the demo set is not available" };
+      return { list: await Promise.all(set.map(async ({ name, path }) => ({ name, data: await readFile(path) }))) };
+    }
     if (!Array.isArray(body.files) || body.files.length === 0) return { error: "add at least one invoice" };
     if (body.files.length > MAX_FILES) return { error: `at most ${MAX_FILES} invoices per run` };
     const list: InvoiceSource[] = [];
@@ -184,6 +193,14 @@ export class WebApp {
   private prune(): void {
     for (const [id, run] of this.runs) if (run.finished && Date.now() - run.created > RUN_TTL_MS) this.runs.delete(id);
   }
+}
+
+// The samples plus DEMO_SET_EXTRAS, or nothing if any of them is missing.
+async function demoSet(): Promise<{ name: string; path: string }[]> {
+  const samples = (await sampleNames()).map((name) => ({ name, path: join(SAMPLES, name) }));
+  const fixtures = await readdir(FIXTURES).catch(() => [] as string[]);
+  if (!samples.length || !DEMO_SET_EXTRAS.every((n) => fixtures.includes(n))) return [];
+  return [...samples, ...DEMO_SET_EXTRAS.map((name) => ({ name, path: join(FIXTURES, name) }))];
 }
 
 async function sampleNames(): Promise<string[]> {
