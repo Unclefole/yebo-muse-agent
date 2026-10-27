@@ -2,7 +2,7 @@
   { "name": "Brightleaf Design Studio", "accounts": ["4821"] },
   { "name": "Copperline Plumbing & Heating", "accounts": ["1907"] },
   { "name": "Juniper & Rye Catering", "accounts": ["6612"] },
-  { "name": "Nimbus Cloud Hosting", "accounts": ["3350"] },
+  { "name": "Nimbus Cloud Hosting", "accounts": ["3350"], "max_per_run_usd": 89 },
   { "name": "Ridgeback Office Supplies", "accounts": ["5520"] },
   { "name": "Larkspur Linen Service", "accounts": ["2207"] }
 ]

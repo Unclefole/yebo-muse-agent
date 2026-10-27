@@ -8,6 +8,8 @@
 //                   vendor file, and every account number in the invoice's payment details
 //                   must be one the file has for that vendor. The mission's payees are the
 //                   vendor file's names, so a payee that is not on it is outside the mission.
+//                   An optional per-vendor "max_per_run_usd" caps what one run may pay that
+//                   vendor in total (e.g. a monthly bill reissued under a new number).
 //
 // Yebo authorizes payments by payee name and amount; it never sees the bank account printed
 // on an invoice. The vendor file is what ties a payee to the account it is really paid to.
@@ -15,14 +17,15 @@
 import { readFileSync } from "node:fs";
 import type { Invoice } from "./invoice.js";
 
-export type Vendor = { name: string; accounts: string[] }; // accounts: last 4 digits
+export type Vendor = { name: string; accounts: string[]; max_per_run_usd?: number }; // accounts: last 4 digits
 export type Rejection = { file: string; payee: string; reason: string };
 
 const norm = (s: string) => s.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
 const invoiceKey = (s: string) => s.normalize("NFKC").replace(/[^0-9a-z]/gi, "").toUpperCase();
 
-// The vendor file: a JSON list of { "name": "...", "accounts": ["4821"] }. Anything
-// malformed throws, so a broken file never quietly turns the check off.
+// The vendor file: a JSON list of { "name": "...", "accounts": ["4821"], "max_per_run_usd": 89 }
+// (the cap is optional). Anything malformed throws, so a broken file never quietly turns
+// the check off.
 export function parseVendors(json: string): Vendor[] {
   const raw = JSON.parse(json);
   if (!Array.isArray(raw) || !raw.length) throw new Error("the vendor file must be a non-empty JSON list");
@@ -32,7 +35,11 @@ export function parseVendors(json: string): Vendor[] {
     if (!Array.isArray(accounts) || !accounts.length || !accounts.every((a: unknown) => typeof a === "string" && /^\d{4}$/.test(a))) {
       throw new Error(`vendor ${i + 1} (${v.name}): "accounts" must list the last 4 digits of each account, e.g. ["4821"]`);
     }
-    return { name: v.name.trim(), accounts };
+    const cap = v.max_per_run_usd;
+    if (cap !== undefined && !(typeof cap === "number" && Number.isFinite(cap) && cap > 0)) {
+      throw new Error(`vendor ${i + 1} (${v.name}): "max_per_run_usd" must be a number above zero`);
+    }
+    return { name: v.name.trim(), accounts, ...(cap !== undefined ? { max_per_run_usd: cap } : {}) };
   });
 }
 
@@ -81,15 +88,22 @@ export function checkInvoices(invoices: Invoice[], vendors: Vendor[] | null): { 
   const passed: Invoice[] = [];
   const rejected: Rejection[] = [];
   const seen = new Map<string, Invoice>();
+  const paid = new Map<string, number>(); // per vendor, in this run, for the cap
   for (const inv of invoices) {
     const key = inv.invoice_number ? `${norm(inv.payee)}|${invoiceKey(inv.invoice_number)}` : null;
     const first = key ? seen.get(key) : undefined;
     let reason: string | null = first ? `duplicate of invoice ${first.invoice_number} in ${first.file}` : null;
     if (!reason && vendors) reason = vendorRefusal(inv, vendors);
+    const vendor = vendors?.find((v) => norm(v.name) === norm(inv.payee));
+    const before = vendor ? paid.get(vendor.name) ?? 0 : 0;
+    if (!reason && vendor?.max_per_run_usd !== undefined && before + inv.amount > vendor.max_per_run_usd + 1e-9) {
+      reason = `over the vendor file's limit for ${vendor.name}: $${vendor.max_per_run_usd} per run ($${before} already in this run)`;
+    }
     if (reason) rejected.push({ file: inv.file, payee: inv.payee, reason });
     else {
       passed.push(inv);
       if (key) seen.set(key, inv);
+      if (vendor) paid.set(vendor.name, Math.round((before + inv.amount) * 100) / 100);
     }
   }
   return { passed, rejected };

@@ -82,6 +82,18 @@ test("over the total budget is DENY, and only what fits is allowed", async () =>
   assert.equal((await checkPayment(token, { payee: "Nimbus Cloud Hosting", amount_usd: 100, memo: "" })).decision, "ALLOW");
 });
 
+test("two identical payments sent at the same instant: only one fits the budget, so only one is allowed", async () => {
+  const { token } = await approvedMission({ per_transaction_usd: 400, cumulative_usd: 400 });
+  const pay = () => checkPayment(token, { payee: "Brightleaf Design Studio", amount_usd: 400, memo: "INV-1042" });
+  const results = await Promise.all([pay(), pay()]);
+  assert.deepEqual(results.map((r) => r.decision).sort(), ["ALLOW", "DENY"]);
+  assert.match(results.find((r) => r.decision === "DENY")!.reason ?? "", /exceeds the budget left \(0\)/);
+  // Ten at once against a budget for three: exactly three allowed.
+  const { token: t2 } = await approvedMission({ per_transaction_usd: 100, cumulative_usd: 300 });
+  const many = await Promise.all(Array.from({ length: 10 }, () => checkPayment(t2, { payee: "Nimbus Cloud Hosting", amount_usd: 100, memo: "" })));
+  assert.equal(many.filter((r) => r.decision === "ALLOW").length, 3);
+});
+
 test("a denied mission never gets a token", async () => {
   const mission = await requestMission("goal", scope());
   assert.equal((await decide(mission.authorizeUrl, "deny")).status, 200);

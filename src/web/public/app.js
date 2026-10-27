@@ -383,7 +383,6 @@ function addDecision(d) {
   const what = el("span", "what");
   what.append(el("span", `decision ${d.decision}`, d.decision), document.createTextNode(`${usd(d.proposal.amount_usd)} to ${d.proposal.payee}`));
   if (d.forced) what.append(el("span", "flag", "FORCED"));
-  if (d.held) what.append(el("span", "flag", "HELD BY CHECKS"));
   li.append(el("span", "time", clock()), what);
   li.append(el("span", "sub", d.decision === "ALLOW" ? d.outcome : `${d.outcome}${d.reason ? `: ${d.reason}` : ""}`));
   if (d.receipt) {

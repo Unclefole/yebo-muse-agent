@@ -76,16 +76,20 @@ Like any accounts-payable system, the agent pays only vendors on a **vendor file
 - **An invoice must match the file.** Its payee must be on the file, and every account number in its payment details must be one the file lists for that vendor. Otherwise it is left out of the limits.
 - **Anything not on the file is outside the mission,** so Yebo returns a real **DENY**: a vendor you have never paid, an account that is not on file, or a near-match name like "Nimbus Cloud Hosting LLC".
 - **Duplicates (always on).** A second invoice with the same payee and invoice number is left out.
+- **Optional cap per vendor.** `"max_per_run_usd": 89` on a vendor caps what one run may pay it in total. A monthly bill sent again under a new number ("corrected copy, supersedes NH-88317") is left out of the budget, which the duplicate check alone would miss. In the demo file, Nimbus Cloud Hosting has this cap.
 
-Yebo checks payee, amount and the budget left; it does not see which invoice a payment is for. So a payment for a refused invoice whose vendor **is** in the mission for another invoice (a duplicate, say) is **held** in code and not sent to Yebo, so it cannot use up the real invoice's budget.
+Every decision is Yebo's. Yebo checks payee, amount and the budget left; it does not see which invoice a payment is for. The total budget is the sum of the invoices that passed, so the payments for those invoices go to Yebo first and use it up exactly. Everything else goes after them: a duplicate, an invoice over a vendor's cap, anything that matches no approved invoice. By then the budget left is $0, so Yebo denies it ("exceeds the budget left (0)"), even when its payee is in the mission for another invoice.
 
-`demo/fixtures/` has three plainly labelled test invoices. What Muse Spark 1.3 read from them, word for word:
+`demo/fixtures/` has four plainly labelled test invoices. What Muse Spark 1.3 read from them, word for word:
 
 | Test invoice | Payee read | Payment details read | Result (vendor file on, the default) |
 |---|---|---|---|
 | `test-account-mismatch-LL-3104.png` | Larkspur Linen Service | "Fictional Bank, account ending 0000" | **DENY** by Yebo: account not on file (file has 2207), so the payee is outside the mission |
 | `test-unknown-vendor-TV-0001.png` | Test Vendor Not On File | "Fictional Bank, account ending 0001" | **DENY** by Yebo: not on the vendor file |
-| `test-duplicate-NH-88317.png` | Nimbus Cloud Hosting | "Fictional Bank, account ending 3350" | **held**: duplicate of NH-88317 (when the agent proposes it) |
+| `test-duplicate-NH-88317.png` | Nimbus Cloud Hosting | "Fictional Bank, account ending 3350" | **DENY** by Yebo: duplicate of NH-88317, left out of the budget (when the agent proposes it) |
+| `test-reissued-NH-88317-R.png` | Nimbus Cloud Hosting, #NH-88317-R | note: "Corrected copy, supersedes NH-88317." | Only one Nimbus payment is allowed: the second gets **DENY** by Yebo, over Nimbus's $89 cap |
+
+Run together with the original NH-88317 three times, Muse Spark proposed **both** Nimbus invoices every time, even writing "reissue superseding NH-88317" in its own memo. Without the cap, both were paid in 2 of 3 runs. With it, each run gave one ALLOW and one DENY ("amount 89 exceeds the budget left (0)"). Run with all the samples, Muse paid only the corrected copy.
 
 With `YEBO_VENDORS=off`, Larkspur and the unknown vendor are allowed: the limits then come from the invoices alone, and only the human approving them can catch it.
 
@@ -104,7 +108,7 @@ npm run dev -- demo/invoices --open             # plan with Muse Spark Open (nee
 YEBO_VENDORS=off npm run dev -- path/to/your-invoice.pdf "Pay this one"   # your own invoices: turn the vendor file off, or point YEBO_VENDORS at your own
 npm run extract -- demo/invoices                # only read the invoices and print the JSON
 npm run check-open                              # check the Muse Spark Open (Baseten) setup
-npm test                                        # 56 tests, no API calls
+npm test                                        # 59 tests, no API calls
 ```
 
 **Pin the date for a repeatable demo:** `YEBO_TODAY=2026-11-02` (a Monday; Brightleaf, Copperline and Ridgeback are due that week, so "pay this week's invoices" selects those three).
@@ -126,17 +130,18 @@ Everything in this repository was built between Oct 26 and Nov 4, 2026. [HACKATH
 - The agent loop, limits built from invoices, and the narrow-only rule
 - Judge mode: the local stand-in gateway and its simulated approval page
 - The web app with the live decision timeline
-- The vendor file (payees and bank accounts, on by default) and the duplicate check, with three labelled test invoices
-- Five fictional sample invoices and their generator, the sample voice command, and 56 tests
+- The vendor file (payees, bank accounts and optional caps, on by default) and the duplicate check, with four labelled test invoices
+- Five fictional sample invoices and their generator, the sample voice command, and 59 tests
 
 **Pre-existing, not part of this submission:** the **Yebo authorization gateway** (`gateway.yebo.dev`) and the **yebo.dev approval page**. This project calls the gateway over the network the same way any customer would; its source is not in this repository. To support this project during the hackathon, small changes were made in the private Yebo repository (an agent-only key that can never approve missions, the approval page taking the approver from the signed-in account, and showing the requesting agent's name and limits); those are not part of this submission either. Judge mode lets you run everything here without them.
 
 ## Engineering notes
 
+- **Two payments at once.** The judge gateway decides each payment in one synchronous step, so two payments sent at the same instant cannot both fit a budget meant for one. Tested: two identical payments at once, one ALLOW; ten at once against a budget for three, three ALLOW. The live Yebo gateway serializes each mission's payments with a per-mission lock and debits the budget through an atomic ledger (a single conditional update in Postgres when a database is configured; in memory, on one server instance, otherwise).
 - **Fail closed everywhere.** Missing limits, a forged or expired mission token, an unknown payee, a malformed model answer, an unsigned request: all refused. The judge gateway requires an HMAC signature on every call, and its approve button needs a per-mission nonce.
 - **Untrusted input stays data.** Invoice text is never followed. Model tool arguments are validated before they reach the gateway. The web page writes all text with `textContent`, serves a strict Content-Security-Policy with no inline scripts, accepts same-origin uploads only, and binds to 127.0.0.1.
 - **No new dependencies.** The web server is Node's built-in `http`; the page is plain HTML, CSS and JavaScript; audio is converted in the browser. Runtime dependency: `dotenv`.
-- **Tested.** `npm test` runs 56 tests with the Meta API mocked: gateway rules, invoice reading and validation, planning before approval, the attack demo, the duplicate and vendor checks, voice, the web app's event stream, and Muse Spark Open routing.
+- **Tested.** `npm test` runs 59 tests with the Meta API mocked: gateway rules, invoice reading and validation, planning before approval, the attack demo, the duplicate, vendor and cap checks, payments sent at the same instant, voice, the web app's event stream, and Muse Spark Open routing.
 
 ## Known limitations
 
@@ -144,7 +149,7 @@ Everything in this repository was built between Oct 26 and Nov 4, 2026. [HACKATH
 - **Judge mode is a stand-in.** Its receipts are local IDs, approval is a button, and its denial reasons list every rule broken (the real gateway reports the first one).
 - **The attack demo forces the hidden requests through** because the Muse Spark models refused them in every test; it shows what happens if an agent is fully compromised.
 - **USD only.** Invoices in other currencies are read but not paid.
-- **The vendor file is on by default** (`YEBO_VENDORS=off` turns it off) and matches account numbers by their last 4 digits. Yebo enforces the payee; the account is checked in code before the limits are built, because Yebo never sees it. If Muse reads an invoice without its account number, it is read once more; if the account is still missing, the invoice is refused. Any other 4-digit-or-longer number in the payment details (a phone number, say) counts as an unknown account and the invoice is refused: it fails closed. Duplicates are caught by repeated invoice numbers only; a resent invoice under a new number is not.
+- **The vendor file is on by default** (`YEBO_VENDORS=off` turns it off) and matches account numbers by their last 4 digits. Yebo enforces the payee; the account is checked in code before the limits are built, because Yebo never sees it. If Muse reads an invoice without its account number, it is read once more; if the account is still missing, the invoice is refused. Any other 4-digit-or-longer number in the payment details (a phone number, say) counts as an unknown account and the invoice is refused: it fails closed. Duplicates are caught by repeated invoice numbers; a bill resent under a new number is caught only if its vendor has a `max_per_run_usd` cap.
 - **Muse Spark Open plans only.** Invoice reading needs structured output, which Baseten does not offer for it.
 - **The sample voice command** is a synthetic macOS voice; record your own for a better demo.
 

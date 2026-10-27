@@ -23,6 +23,7 @@ const NIMBUS_AGAIN = inv("nimbus-again.png", "Nimbus Cloud Hosting", 89, "nh 883
 const BRIGHTLEAF = inv("brightleaf.png", "Brightleaf Design Studio", 400, "INV-1042", "Bank transfer to Brightleaf Design Studio\nFictional Bank, account ending 4821");
 const LARKSPUR_OTHER_ACCOUNT = inv("larkspur.png", "Larkspur Linen Service", 180, "LL-3104", "Pay Larkspur Linen Service\nFictional Bank, account ending 0000");
 const UNKNOWN = inv("unknown.png", "Test Vendor Not On File", 150, "TV-0001", "Fictional Bank, account ending 0001");
+const NIMBUS_REISSUED = inv("nimbus-reissued.png", "Nimbus Cloud Hosting", 89, "NH-88317-R", "Pay Nimbus Cloud Hosting\nFictional Bank, account ending 3350");
 
 test("account endings: the last 4 digits of each account-like number", () => {
   assert.deepEqual(accountEndings("Fictional Bank, account ending 4821"), ["4821"]);
@@ -76,7 +77,19 @@ test("vendor names: the file's spelling, whatever the case and spacing on the in
   assert.equal(vendorName("Nimbus Cloud Hosting LLC", VENDORS), null);
 });
 
+test("vendor cap: a vendor is paid at most max_per_run_usd in one run, whatever the invoice numbers", () => {
+  const capped: Vendor[] = [{ name: "Nimbus Cloud Hosting", accounts: ["3350"], max_per_run_usd: 89 }, VENDORS[1]];
+  const { passed, rejected } = checkInvoices([NIMBUS, NIMBUS_REISSUED, BRIGHTLEAF], capped);
+  assert.deepEqual(passed, [NIMBUS, BRIGHTLEAF]);
+  assert.deepEqual(rejected, [{ file: "nimbus-reissued.png", payee: "Nimbus Cloud Hosting", reason: "over the vendor file's limit for Nimbus Cloud Hosting: $89 per run ($89 already in this run)" }]);
+  assert.equal(checkInvoices([NIMBUS, NIMBUS_REISSUED], VENDORS).rejected.length, 0, "without a cap, a reissue under a new number passes");
+  assert.equal(checkInvoices([{ ...NIMBUS, amount: 120 }], capped).rejected.length, 1, "one invoice over the cap is refused too");
+});
+
 test("a malformed vendor file is an error, never a silently disabled check", () => {
+  assert.throws(() => parseVendors('[{"name":"X","accounts":["1234"],"max_per_run_usd":0}]'), /max_per_run_usd/);
+  assert.throws(() => parseVendors('[{"name":"X","accounts":["1234"],"max_per_run_usd":"89"}]'), /max_per_run_usd/);
+  assert.deepEqual(parseVendors('[{"name":"X","accounts":["1234"],"max_per_run_usd":89}]'), [{ name: "X", accounts: ["1234"], max_per_run_usd: 89 }]);
   assert.throws(() => parseVendors("[]"), /non-empty/);
   assert.throws(() => parseVendors('[{"name":"X","accounts":["12345"]}]'), /last 4 digits/);
   assert.throws(() => parseVendors('[{"accounts":["1234"]}]'), /"name" is required/);
@@ -86,6 +99,7 @@ test("a malformed vendor file is an error, never a silently disabled check", () 
 // ── Whole runs ──────────────────────────────────────────────────────────────
 const META = "https://api.meta.test/v1";
 const BATCH = [NIMBUS, NIMBUS_AGAIN, BRIGHTLEAF, LARKSPUR_OTHER_ACCOUNT, UNKNOWN];
+let batch = BATCH; // what the fake model reads and proposes
 const realFetch = globalThis.fetch;
 let gw: JudgeGateway;
 
@@ -95,13 +109,13 @@ function fakeMeta(body: any): unknown {
   const reply = (message: unknown) => ({ choices: [{ message: { role: "assistant", ...(message as object) } }] });
   const schema = body.response_format?.json_schema?.name;
   if (schema === "invoice") {
-    const v = BATCH.find((i) => JSON.stringify(body.messages).includes(`(${i.file})`))!;
+    const v = batch.find((i) => JSON.stringify(body.messages).includes(`(${i.file})`))!;
     const { file: _file, ...fields } = v;
     return reply({ content: JSON.stringify(fields) });
   }
   if (schema === "payment_requests") return reply({ content: JSON.stringify({ requests: [] }) });
   if (body.messages.some((m: any) => m.role === "tool")) return reply({ content: "Done (dry run, no money moved)." });
-  const tool_calls = BATCH.map((i, n) => ({
+  const tool_calls = batch.map((i, n) => ({
     id: `c${n}`, type: "function", function: { name: "propose_payment", arguments: JSON.stringify({ payee: i.payee, amount_usd: i.amount, memo: i.invoice_number }) },
   }));
   return reply({ content: null, tool_calls });
@@ -120,7 +134,10 @@ before(async () => {
   process.env.YEBO_HMAC_SECRET = "vendor-test";
 });
 
-beforeEach(() => delete process.env.YEBO_VENDORS);
+beforeEach(() => {
+  delete process.env.YEBO_VENDORS;
+  batch = BATCH;
+});
 
 after(async () => {
   globalThis.fetch = realFetch;
@@ -128,34 +145,36 @@ after(async () => {
   await gw.stop();
 });
 
-async function runBatch(): Promise<RunEvent[]> {
+async function run(): Promise<RunEvent[]> {
   const events: RunEvent[] = [];
-  const sources = BATCH.map((i) => ({ name: i.file === "nimbus.pdf" ? "nimbus.pdf" : i.file, data: Buffer.from("fake") }));
+  const sources = batch.map((i) => ({ name: i.file, data: Buffer.from("fake") }));
   await runAgent({ goal: "Pay these invoices.", sources }, { mode: "judge", url: process.env.YEBO_GATEWAY_URL!, stop: async () => {} }, (e) => events.push(e));
   return events;
 }
 
-// "held" means the checks stopped it before Yebo; otherwise Yebo decided.
-const outcome = (ev: RunEvent[]) => ev.flatMap((e) => (e.type === "decision" ? [`${e.proposal.payee} ${e.proposal.amount_usd} ${e.decision}${e.held ? " held" : ""}`] : []));
+// Every decision is Yebo's. Proposals that pay an approved invoice go first; the rest
+// after them, when the budget left is zero.
+const outcome = (ev: RunEvent[]) => ev.flatMap((e) => (e.type === "decision" ? [`${e.proposal.payee} ${e.proposal.amount_usd} ${e.decision}`] : []));
 
-test("run with YEBO_VENDORS=off: the duplicate is held, but unknown payees and accounts are paid", async () => {
+test("run with YEBO_VENDORS=off: Yebo denies the duplicate, but unknown payees and accounts are paid", async () => {
   process.env.YEBO_VENDORS = "off";
-  const ev = await runBatch();
+  const ev = await run();
   assert.equal((ev.find((e) => e.type === "started") as any).vendorCheck, false);
   const refused = ev.find((e) => e.type === "invoices_refused");
   assert.ok(refused && refused.type === "invoices_refused");
   assert.deepEqual(refused.rejected.map((r) => r.file), ["nimbus-again.png"]);
   assert.deepEqual(outcome(ev), [
     "Nimbus Cloud Hosting 89 ALLOW",
-    "Nimbus Cloud Hosting 89 DENY held",
     "Brightleaf Design Studio 400 ALLOW",
     "Larkspur Linen Service 180 ALLOW",
     "Test Vendor Not On File 150 ALLOW",
+    "Nimbus Cloud Hosting 89 DENY",
   ]);
+  assert.match((ev.filter((e) => e.type === "decision").at(-1) as any).reason, /exceeds the budget left \(0\)/);
 });
 
 test("run with the vendor file (the default): payees and accounts not on file are outside the mission and Yebo denies them", async () => {
-  const ev = await runBatch();
+  const ev = await run();
   assert.equal((ev.find((e) => e.type === "started") as any).vendorCheck, true);
   const mission = ev.find((e) => e.type === "mission");
   assert.ok(mission && mission.type === "mission");
@@ -163,8 +182,8 @@ test("run with the vendor file (the default): payees and accounts not on file ar
   assert.equal(mission.limits.total_usd, 489);
   assert.deepEqual(outcome(ev), [
     "Nimbus Cloud Hosting 89 ALLOW",
-    "Nimbus Cloud Hosting 89 DENY held",
     "Brightleaf Design Studio 400 ALLOW",
+    "Nimbus Cloud Hosting 89 DENY",
     "Larkspur Linen Service 180 DENY",
     "Test Vendor Not On File 150 DENY",
   ]);
@@ -172,25 +191,41 @@ test("run with the vendor file (the default): payees and accounts not on file ar
   assert.ok(refused && refused.type === "invoices_refused");
   assert.match(refused.rejected.find((r) => r.file === "larkspur.png")!.reason, /account ending 0000 is not on file for Larkspur Linen Service/);
   // A real Yebo decision: the payee is outside the approved mission.
-  const denied = ev.flatMap((e) => (e.type === "decision" && e.decision === "DENY" && !e.held ? [e.reason] : []));
-  assert.match(denied[0]!, /payee 'Larkspur Linen Service' is not in the approved mission/);
-  assert.match(denied[1]!, /payee 'Test Vendor Not On File' is not in the approved mission/);
+  const denied = ev.flatMap((e) => (e.type === "decision" && e.decision === "DENY" ? [e.reason] : []));
+  assert.match(denied[0]!, /exceeds the budget left \(0\)/);
+  assert.match(denied[1]!, /payee 'Larkspur Linen Service' is not in the approved mission/);
+  assert.match(denied[2]!, /payee 'Test Vendor Not On File' is not in the approved mission/);
 });
 
-test("the duplicate is held whichever copy the agent proposes first, and Yebo never sees it", async () => {
+test("the duplicate cannot use up a real invoice's budget, whichever copy the agent proposes first", async () => {
+  for (const order of [[NIMBUS, NIMBUS_AGAIN, BRIGHTLEAF], [NIMBUS_AGAIN, NIMBUS, BRIGHTLEAF]]) {
+    batch = order;
+    const ev = await run();
+    const allowed = ev.flatMap((e) => (e.type === "decision" && e.decision === "ALLOW" ? [`${e.proposal.payee} ${e.proposal.amount_usd}`] : []));
+    assert.deepEqual(allowed.sort(), ["Brightleaf Design Studio 400", "Nimbus Cloud Hosting 89"]);
+    assert.equal([...gw.missions.values()].at(-1)!.spent_usd, 489);
+  }
+});
+
+test("a reissued invoice under a new number: the vendor cap keeps it out of the budget and Yebo denies it", async () => {
+  batch = [NIMBUS, NIMBUS_REISSUED, BRIGHTLEAF];
+  const ev = await run();
+  const refused = ev.find((e) => e.type === "invoices_refused");
+  assert.ok(refused && refused.type === "invoices_refused");
+  assert.match(refused.rejected[0].reason, /over the vendor file's limit for Nimbus Cloud Hosting: \$89 per run/);
+  const mission = ev.find((e) => e.type === "mission");
+  assert.ok(mission && mission.type === "mission");
+  assert.equal(mission.limits.total_usd, 489, "the reissue is not in the budget");
+  assert.deepEqual(outcome(ev), ["Nimbus Cloud Hosting 89 ALLOW", "Brightleaf Design Studio 400 ALLOW", "Nimbus Cloud Hosting 89 DENY"]);
+  assert.match((ev.filter((e) => e.type === "decision").at(-1) as any).reason, /exceeds the budget left \(0\)/);
+  // With the vendor file off there is no cap: both copies are paid.
   process.env.YEBO_VENDORS = "off";
-  const ev = await runBatch();
-  const held = ev.flatMap((e) => (e.type === "decision" && e.held ? [e] : []));
-  assert.equal(held.length, 1);
-  assert.equal(held[0].outcome, "held, not sent to Yebo");
-  assert.equal(held[0].receipt, undefined);
-  const mission = [...gw.missions.values()].at(-1)!;
-  assert.equal(mission.spent_usd, 89 + 400 + 180 + 150, "the gateway only ever saw one Nimbus payment");
+  assert.deepEqual(outcome(await run()), ["Nimbus Cloud Hosting 89 ALLOW", "Nimbus Cloud Hosting 89 ALLOW", "Brightleaf Design Studio 400 ALLOW"]);
 });
 
 test("a broken vendor file stops the run before anything is paid", async () => {
   process.env.YEBO_VENDORS = "demo/no-such-vendors.json";
-  const ev = await runBatch();
+  const ev = await run();
   assert.equal(ev.filter((e) => e.type === "decision").length, 0);
   const err = ev.find((e) => e.type === "error");
   assert.ok(err && err.type === "error");
