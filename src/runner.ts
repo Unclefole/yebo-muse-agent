@@ -10,14 +10,15 @@
 // invoice, total), computed here in code. The agent's plan can only narrow them (e.g.
 // "pay this week's invoices" selects some invoices); a payment that matches no invoice
 // never widens them. A tricked agent can propose anything; it cannot change what is approved.
-// Before approval, src/vendors.ts removes duplicate invoices and, with a vendor file
-// (YEBO_VENDORS), invoices whose payee or bank account is not on file.
+// Before approval, src/vendors.ts removes duplicate invoices and invoices whose payee or
+// bank account is not on the vendor file (on by default; YEBO_VENDORS=off turns it off).
+// With the vendor file, the mission's payees are the vendor file's names.
 
 import { chat, endpoint, type Brain, type Message, type Tool } from "./muse.js";
 import { checkPayment, requestMission, waitForApproval, DRY_RUN_OUTCOME, type Decision, type PaymentProposal } from "./yebo.js";
 import { extractInvoiceSource, type Invoice, type InvoiceSource } from "./invoice.js";
 import { findHiddenRequests, type HiddenRequest } from "./injection.js";
-import { checkInvoices, loadVendors, type Rejection } from "./vendors.js";
+import { accountEndings, checkInvoices, loadVendors, vendorName, type Rejection, type Vendor } from "./vendors.js";
 import type { GatewayMode } from "./gatewayMode.js";
 
 const MISSION_TTL_MS = 15 * 60_000;
@@ -153,6 +154,22 @@ export function selectedInvoices(invoices: Invoice[], proposals: PaymentProposal
   return invoices.filter((i) => chosen.has(i));
 }
 
+// The vendor file's name for a payee; with the vendor file off, every payee counts as is.
+function onFile(payee: string, vendors: Vendor[] | null): string | null {
+  return vendors ? vendorName(payee, vendors) : null;
+}
+
+// Limits for a plain instruction with no invoices: from the plan, and with the vendor file
+// only the proposals whose payee is on it (under the file's names). Null if none is.
+function planLimits(proposals: PaymentProposal[], vendors: Vendor[] | null): MissionLimits | null {
+  if (!vendors) return proposals.length ? limitsFor(proposals) : null;
+  const known = proposals.flatMap((p) => {
+    const name = vendorName(p.payee, vendors);
+    return name ? [{ ...p, payee: name }] : [];
+  });
+  return known.length ? limitsFor(known) : null;
+}
+
 // Limits from proposals: only for a plain instruction with no invoices.
 export function limitsFor(proposals: PaymentProposal[]): MissionLimits {
   return {
@@ -163,8 +180,18 @@ export function limitsFor(proposals: PaymentProposal[]): MissionLimits {
   };
 }
 
-async function readInvoices(sources: InvoiceSource[], emit: Emit): Promise<Invoice[]> {
-  const results = await Promise.allSettled(sources.map((s) => extractInvoiceSource(s)));
+// With the vendor file on, an invoice read without an account number would be refused, so
+// it is read once more (in testing Muse Spark copied the account in about 65 of 66 reads).
+// The second reading is used only if it has one; otherwise the first stands and is refused.
+async function readOne(source: InvoiceSource, needAccount: boolean): Promise<Invoice> {
+  const first = await extractInvoiceSource(source);
+  if (!needAccount || accountEndings(first.payment_details).length) return first;
+  const again = await extractInvoiceSource(source).catch(() => null);
+  return again && accountEndings(again.payment_details).length ? again : first;
+}
+
+async function readInvoices(sources: InvoiceSource[], needAccount: boolean, emit: Emit): Promise<Invoice[]> {
+  const results = await Promise.allSettled(sources.map((s) => readOne(s, needAccount)));
   const invoices: Invoice[] = [];
   results.forEach((r, i) => {
     if (r.status === "fulfilled") {
@@ -214,7 +241,7 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
       type: "started", mode: gateway.mode, agentMode, brain, model: ep.model, brainLabel: ep.label,
       readerModel: endpoint("muse-spark").model, goal: input.goal, invoices: input.sources.length, today: date, vendorCheck: !!vendors,
     });
-    const invoices = await readInvoices(input.sources, emit);
+    const invoices = await readInvoices(input.sources, !!vendors, emit);
     if (input.sources.length && !invoices.length) throw new Error("none of the invoices could be read");
     const dated = `${input.goal}\n\nToday is ${weekday(date)}, ${date}.`;
     const userContent = invoices.length
@@ -272,13 +299,17 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
 
     // 3. One mission for the whole plan. With invoices, the limits come from the invoices
     //    the agent chose that pass the checks (never from the plan); with a plain
-    //    instruction, from the plan. Anything outside them is denied by Yebo.
+    //    instruction, from the plan. With the vendor file, only its vendors can be payees,
+    //    under its names. Anything outside the limits is denied by Yebo.
     let missionToken = process.env.YEBO_MISSION_TOKEN ?? ""; // reuse an approved mission if given
     // Yebo sees payee, amount and the budget left, not which invoice a payment is for. So
-    // each invoice that passed the checks pays for one proposal at most, and a proposal that
-    // matches only a refused invoice is held here instead of using up an approved one.
+    // each invoice that passed the checks pays for one proposal at most. A proposal that
+    // matches only a refused invoice goes to Yebo, which denies it when its payee is outside
+    // the mission; it is held here only when its payee is in the mission for another invoice
+    // (Yebo would allow it and use up that invoice's budget).
     const unpaid: Invoice[] = [];
     const refused: { invoice: Invoice; reason: string }[] = [];
+    let missionPayees: string[] = [];
     if (!missionToken && (proposals.length || forced.length)) {
       let chosen: Invoice[] = [];
       if (invoices.length) {
@@ -288,25 +319,32 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
         unpaid.push(...checked.passed);
         for (const r of checked.rejected) refused.push({ invoice: invoices.find((i) => i.file === r.file)!, reason: r.reason });
       }
-      const limits = invoices.length ? limitsFromInvoices(chosen) : proposals.length ? limitsFor(proposals) : null;
-      if (limits) missionToken = await approveMission(input.goal, limits, invoices.length ? "invoices" : "proposals", emit);
-      else emit({ type: "no_mission", reason: "the plan matches none of the invoices that can be paid in USD and pass the checks" });
+      const limits = invoices.length
+        ? limitsFromInvoices(chosen.map((i) => ({ ...i, payee: onFile(i.payee, vendors) ?? i.payee })))
+        : planLimits(proposals, vendors);
+      if (limits) {
+        missionPayees = limits.payees;
+        missionToken = await approveMission(input.goal, limits, invoices.length ? "invoices" : "proposals", emit);
+      } else emit({ type: "no_mission", reason: invoices.length ? "the plan matches none of the invoices that can be paid in USD and pass the checks" : "the plan names no payee on the vendor file" });
     }
+    // What goes to Yebo: the vendor file's name for the payee, when it has one.
+    const toYebo = (p: PaymentProposal): PaymentProposal => ({ ...p, payee: onFile(p.payee, vendors) ?? p.payee });
 
     // 4. Every proposal is checked: the agent's first, in order, then the forced ones.
     for (const { id, proposal } of planned) {
       const slot = unpaid.findIndex((i) => sameAs(proposal, i));
       if (slot >= 0) unpaid.splice(slot, 1);
-      const hold = slot < 0 ? refused.find((x) => sameAs(proposal, x.invoice)) : undefined;
+      const refusal = slot < 0 ? refused.find((x) => sameAs(proposal, x.invoice)) : undefined;
+      const hold = refusal && missionPayees.includes(toYebo(proposal).payee) ? refusal : undefined;
       const r = hold
         ? { decision: "DENY" as Decision, outcome: "held, not sent to Yebo", reason: hold.reason, receipt: undefined }
-        : await checkPayment(missionToken, proposal);
+        : await checkPayment(missionToken, toYebo(proposal));
       const result: DecisionResult = { id, proposal, ...(hold ? { held: true } : {}), decision: r.decision, outcome: r.outcome, reason: r.reason, receipt: r.receipt };
       results.push(result);
       emit({ type: "decision", ...result });
     }
     for (const f of forced) {
-      const r = await checkPayment(missionToken, f.proposal);
+      const r = await checkPayment(missionToken, toYebo(f.proposal));
       const result: DecisionResult = { id: f.id, proposal: f.proposal, forced: true, decision: r.decision, outcome: r.outcome, reason: r.reason, receipt: r.receipt };
       results.push(result);
       emit({ type: "decision", ...result });

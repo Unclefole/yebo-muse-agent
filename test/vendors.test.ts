@@ -5,7 +5,7 @@ import { test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { JudgeGateway } from "../src/judge/gateway.js";
 import { runAgent, type RunEvent } from "../src/runner.js";
-import { accountEndings, checkInvoices, parseVendors, vendorRefusal, type Vendor } from "../src/vendors.js";
+import { accountEndings, checkInvoices, loadVendors, parseVendors, vendorName, vendorRefusal, type Vendor } from "../src/vendors.js";
 import type { Invoice } from "../src/invoice.js";
 
 const VENDORS: Vendor[] = [
@@ -54,6 +54,26 @@ test("without a vendor file only duplicates are refused; with one, unknown payee
   const checked = checkInvoices(all, VENDORS);
   assert.deepEqual(checked.passed, [NIMBUS, BRIGHTLEAF]);
   assert.deepEqual(checked.rejected.map((r) => r.file), ["nimbus-again.png", "larkspur.png", "unknown.png"]);
+});
+
+test("the vendor file is on by default; YEBO_VENDORS=off turns it off", () => {
+  const saved = process.env.YEBO_VENDORS;
+  try {
+    delete process.env.YEBO_VENDORS;
+    assert.ok(loadVendors()?.some((v) => v.name === "Larkspur Linen Service"), "demo/vendors.json by default");
+    process.env.YEBO_VENDORS = "off";
+    assert.equal(loadVendors(), null);
+    process.env.YEBO_VENDORS = "OFF";
+    assert.equal(loadVendors(), null);
+  } finally {
+    if (saved === undefined) delete process.env.YEBO_VENDORS;
+    else process.env.YEBO_VENDORS = saved;
+  }
+});
+
+test("vendor names: the file's spelling, whatever the case and spacing on the invoice", () => {
+  assert.equal(vendorName("  nimbus   CLOUD hosting ", VENDORS), "Nimbus Cloud Hosting");
+  assert.equal(vendorName("Nimbus Cloud Hosting LLC", VENDORS), null);
 });
 
 test("a malformed vendor file is an error, never a silently disabled check", () => {
@@ -118,7 +138,8 @@ async function runBatch(): Promise<RunEvent[]> {
 // "held" means the checks stopped it before Yebo; otherwise Yebo decided.
 const outcome = (ev: RunEvent[]) => ev.flatMap((e) => (e.type === "decision" ? [`${e.proposal.payee} ${e.proposal.amount_usd} ${e.decision}${e.held ? " held" : ""}`] : []));
 
-test("run without a vendor file: the duplicate is held, but unknown payees and accounts are paid", async () => {
+test("run with YEBO_VENDORS=off: the duplicate is held, but unknown payees and accounts are paid", async () => {
+  process.env.YEBO_VENDORS = "off";
   const ev = await runBatch();
   assert.equal((ev.find((e) => e.type === "started") as any).vendorCheck, false);
   const refused = ev.find((e) => e.type === "invoices_refused");
@@ -133,8 +154,7 @@ test("run without a vendor file: the duplicate is held, but unknown payees and a
   ]);
 });
 
-test("run with the vendor file: only invoices whose payee and account are on file are paid", async () => {
-  process.env.YEBO_VENDORS = "demo/vendors.json";
+test("run with the vendor file (the default): payees and accounts not on file are outside the mission and Yebo denies them", async () => {
   const ev = await runBatch();
   assert.equal((ev.find((e) => e.type === "started") as any).vendorCheck, true);
   const mission = ev.find((e) => e.type === "mission");
@@ -145,15 +165,20 @@ test("run with the vendor file: only invoices whose payee and account are on fil
     "Nimbus Cloud Hosting 89 ALLOW",
     "Nimbus Cloud Hosting 89 DENY held",
     "Brightleaf Design Studio 400 ALLOW",
-    "Larkspur Linen Service 180 DENY held",
-    "Test Vendor Not On File 150 DENY held",
+    "Larkspur Linen Service 180 DENY",
+    "Test Vendor Not On File 150 DENY",
   ]);
-  const denied = ev.flatMap((e) => (e.type === "decision" && e.decision === "DENY" ? [e.reason] : []));
-  assert.match(denied[1]!, /account ending 0000 is not on file for Larkspur Linen Service/);
-  assert.match(denied[2]!, /payee 'Test Vendor Not On File' is not on the vendor file/);
+  const refused = ev.find((e) => e.type === "invoices_refused");
+  assert.ok(refused && refused.type === "invoices_refused");
+  assert.match(refused.rejected.find((r) => r.file === "larkspur.png")!.reason, /account ending 0000 is not on file for Larkspur Linen Service/);
+  // A real Yebo decision: the payee is outside the approved mission.
+  const denied = ev.flatMap((e) => (e.type === "decision" && e.decision === "DENY" && !e.held ? [e.reason] : []));
+  assert.match(denied[0]!, /payee 'Larkspur Linen Service' is not in the approved mission/);
+  assert.match(denied[1]!, /payee 'Test Vendor Not On File' is not in the approved mission/);
 });
 
 test("the duplicate is held whichever copy the agent proposes first, and Yebo never sees it", async () => {
+  process.env.YEBO_VENDORS = "off";
   const ev = await runBatch();
   const held = ev.flatMap((e) => (e.type === "decision" && e.held ? [e] : []));
   assert.equal(held.length, 1);

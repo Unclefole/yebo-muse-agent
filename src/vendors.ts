@@ -3,9 +3,11 @@
 // any payment for a removed invoice (payee not approved, or over the budget).
 //
 //   duplicates      always on: a second invoice with the same payee and invoice number
-//   vendor file     opt-in (YEBO_VENDORS=path/to/vendors.json): the payee must be on the
+//   vendor file     on by default (demo/vendors.json; YEBO_VENDORS=path/to/file to use
+//                   another, YEBO_VENDORS=off to turn it off): the payee must be on the
 //                   vendor file, and every account number in the invoice's payment details
-//                   must be one the file has for that vendor
+//                   must be one the file has for that vendor. The mission's payees are the
+//                   vendor file's names, so a payee that is not on it is outside the mission.
 //
 // Yebo authorizes payments by payee name and amount; it never sees the bank account printed
 // on an invoice. The vendor file is what ties a payee to the account it is really paid to.
@@ -34,10 +36,14 @@ export function parseVendors(json: string): Vendor[] {
   });
 }
 
-// The vendor file named by YEBO_VENDORS, or null when the check is off.
+export const DEFAULT_VENDOR_FILE = "demo/vendors.json";
+
+// The vendor file (YEBO_VENDORS, or demo/vendors.json when unset), or null when
+// YEBO_VENDORS=off.
 export function loadVendors(): Vendor[] | null {
-  const path = process.env.YEBO_VENDORS?.trim();
-  if (!path) return null;
+  const setting = process.env.YEBO_VENDORS?.trim();
+  if (setting?.toLowerCase() === "off") return null;
+  const path = setting || DEFAULT_VENDOR_FILE;
   try {
     return parseVendors(readFileSync(path, "utf8"));
   } catch (err) {
@@ -51,6 +57,11 @@ export function accountEndings(paymentDetails: string | null): string[] {
     .map((m) => m[0].replace(/\D/g, ""))
     .filter((d) => d.length >= 4)
     .map((d) => d.slice(-4));
+}
+
+// The vendor file's name for this payee (case and spacing do not matter), or null.
+export function vendorName(payee: string, vendors: Vendor[]): string | null {
+  return vendors.find((v) => norm(v.name) === norm(payee))?.name ?? null;
 }
 
 // Why this invoice does not match the vendor file, or null if it does.

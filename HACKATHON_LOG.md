@@ -137,3 +137,13 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - Found in live testing and fixed the same day: the first version of the report turn left out the hidden Ridgeback note, which the agent used to mention; the report request now asks for it.
 - `test/runner.test.ts`: one proposal per turn and all at once both give one mission covering all three invoices and three ALLOW; the agent only hears "recorded" while planning; the report turn has no tools and never sees the gateway's raw `executed` field. These fail on the old runner. 52 tests.
 - Live, judge mode, dry run: normal 5 ALLOW; voice 3 ALLOW, limits $1,890; attack demo 5 ALLOW and 2 forced DENY (same reasons) on both `muse-spark-1.3` and Muse Spark Open, and both final messages report the hidden note; samples + fixtures with the vendor file: 5 ALLOW and 3 held.
+
+## 2026-10-26 (vendor file on by default)
+
+- The vendor file (`demo/vendors.json`) is now on by default; `YEBO_VENDORS=off` turns it off, and a path uses another file. The mission's payees are the vendor file's names; invoices only decide which approved vendors get paid and how much. Payments go to Yebo under the vendor file's spelling of the payee.
+- A payee or account not on the vendor file is now outside the mission and gets a real Yebo DENY ("payee ... is not in the approved mission"). The code holds a payment back only when Yebo could not tell it apart: a refused invoice (e.g. a duplicate) for a vendor that is in the mission for another invoice.
+- With a plain instruction (no invoices), only payees on the vendor file go into the limits.
+- Found in a live voice run: Muse Spark once read Brightleaf's payment details without the account number, so the vendor check (correctly, fail closed) refused a real invoice. In 6 further extract runs of all 5 samples the account was always read (30 of 30). Invoices read without an account number are now read once more when the vendor file is on.
+- Muse Spark 1.3 read the fixtures faithfully: Larkspur "Fictional Bank, account ending 0000", the unknown vendor "account ending 0001", the duplicate "account ending 3350".
+- Tests: 56 (default on and `off`, the vendor file's spelling, real DENY for payees and accounts not on file, the duplicate still held, plain instructions, the re-read). The web app and runner tests now give their mocked invoices the vendor file's accounts.
+- Live, judge mode, dry run, date pinned to Nov 2, vendor file on: normal 5 ALLOW; voice 3 ALLOW, limits $1,890 (twice after the re-read change); attack demo on Muse Spark 1.3 and Muse Spark Open 5 ALLOW and 2 forced DENY, same reasons; samples + fixtures 5 ALLOW, Larkspur and the unknown vendor DENY by Yebo. With `YEBO_VENDORS=off`: 7 ALLOW.

@@ -7,10 +7,11 @@ import { JudgeGateway } from "../src/judge/gateway.js";
 import { runAgent, type RunEvent } from "../src/runner.js";
 
 const META = "https://api.meta.test/v1";
+// Accounts match demo/vendors.json, which is on by default.
 const INVOICES = [
-  { file: "a.png", payee: "Brightleaf Design Studio", amount: 400, invoice_number: "INV-1042" },
-  { file: "b.png", payee: "Copperline Plumbing & Heating", amount: 1250, invoice_number: "CP-2291" },
-  { file: "c.png", payee: "Nimbus Cloud Hosting", amount: 89, invoice_number: "NH-88317" },
+  { file: "a.png", payee: "Brightleaf Design Studio", amount: 400, invoice_number: "INV-1042", account: "4821" },
+  { file: "b.png", payee: "Copperline Plumbing & Heating", amount: 1250, invoice_number: "CP-2291", account: "1907" },
+  { file: "c.png", payee: "Nimbus Cloud Hosting", amount: 89, invoice_number: "NH-88317", account: "3350" },
 ];
 const realFetch = globalThis.fetch;
 let gw: JudgeGateway;
@@ -22,7 +23,7 @@ function fakeMeta(body: any): unknown {
   const schema = body.response_format?.json_schema?.name;
   if (schema === "invoice") {
     const v = INVOICES.find((i) => JSON.stringify(body.messages).includes(`(${i.file})`))!;
-    return reply({ content: JSON.stringify({ payee: v.payee, amount: v.amount, currency: "USD", due_date: "2026-11-07", invoice_number: v.invoice_number, payment_details: null, notes: null }) });
+    return reply({ content: JSON.stringify({ payee: v.payee, amount: v.amount, currency: "USD", due_date: "2026-11-07", invoice_number: v.invoice_number, payment_details: `Fictional Bank, account ending ${v.account}`, notes: null }) });
   }
   if (schema === "payment_requests") return reply({ content: JSON.stringify({ requests: [] }) });
   chatBodies.push(body);
@@ -85,6 +86,17 @@ for (const n of [1, 3]) {
   });
 }
 
+test("a plain instruction (no invoices): payees on the vendor file are approved under the file's names", async () => {
+  perTurn = 3;
+  const events: RunEvent[] = [];
+  await runAgent({ goal: "Pay my usual vendors.", sources: [] }, { mode: "judge", url: process.env.YEBO_GATEWAY_URL!, stop: async () => {} }, (e) => events.push(e));
+  const mission = events.find((e) => e.type === "mission");
+  assert.ok(mission && mission.type === "mission");
+  assert.equal(mission.source, "proposals");
+  assert.deepEqual(mission.limits.payees, INVOICES.map((i) => i.payee));
+  assert.deepEqual(events.flatMap((e) => (e.type === "decision" ? [e.decision] : [])), ["ALLOW", "ALLOW", "ALLOW"]);
+});
+
 test("while planning, the agent only hears 'recorded'; the report turn gets the decisions and no tools", async () => {
   perTurn = 1;
   await run();
@@ -104,4 +116,30 @@ test("while planning, the agent only hears 'recorded'; the report turn gets the 
   assert.match(last.content, /Yebo checked your plan/);
   assert.equal(JSON.parse(last.content.slice(last.content.indexOf("["), last.content.lastIndexOf("]") + 1)).length, 3);
   assert.doesNotMatch(last.content, /executed/, "the model never sees the gateway's raw 'executed' field");
+});
+
+test("with the vendor file on, an invoice read without an account number is read once more", async () => {
+  perTurn = 3;
+  let reads = 0;
+  const realMeta = globalThis.fetch;
+  // The first reading of b.png leaves the account out; the second has it.
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    if (String(url).startsWith(META) && body?.response_format?.json_schema?.name === "invoice" && JSON.stringify(body.messages).includes("(b.png)") && reads++ === 0) {
+      const content = JSON.stringify({ payee: INVOICES[1].payee, amount: 1250, currency: "USD", due_date: "2026-11-07", invoice_number: "CP-2291", payment_details: "Pay Copperline Plumbing & Heating", notes: null });
+      return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content } }] }), { status: 200 });
+    }
+    return realMeta(url, init);
+  }) as typeof fetch;
+  try {
+    const ev = await run();
+    assert.equal(reads, 2, "b.png was read twice");
+    const b = ev.find((e) => e.type === "invoice" && e.invoice.file === "b.png");
+    assert.ok(b && b.type === "invoice");
+    assert.match(b.invoice.payment_details ?? "", /1907/);
+    assert.equal(ev.filter((e) => e.type === "invoice").length, 3, "each invoice is reported once");
+    assert.deepEqual(ev.flatMap((e) => (e.type === "decision" ? [e.decision] : [])), ["ALLOW", "ALLOW", "ALLOW"]);
+  } finally {
+    globalThis.fetch = realMeta;
+  }
 });
