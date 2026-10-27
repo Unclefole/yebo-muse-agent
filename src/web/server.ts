@@ -12,17 +12,22 @@ import { fileURLToPath } from "node:url";
 import { startGateway, type GatewayMode } from "../gatewayMode.js";
 import { model, endpoint, openAvailable } from "../muse.js";
 import { SUPPORTED_EXTENSIONS, type InvoiceSource } from "../invoice.js";
-import { runAgent, today, type RunEvent } from "../runner.js";
+import { runAgent, today, type AgentMode, type RunEvent } from "../runner.js";
 import { transcribe, VOICE_MODEL } from "../voice.js";
+import { MemoryLedger } from "../ledger.js";
+import { loadVendorFile, type Vendor } from "../vendors.js";
+import { describe as describeLab, scenario as labScenario } from "./lab.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(HERE, "public");
-const SAMPLES = join(HERE, "..", "..", "demo", "invoices");
-const FIXTURES = join(HERE, "..", "..", "demo", "fixtures");
+const ROOT = join(HERE, "..", "..");
+const DEMO = join(ROOT, "demo");
+const SAMPLES = join(DEMO, "invoices");
+const FIXTURES = join(DEMO, "fixtures");
 // The demo set (the video's run): the 5 samples plus two labelled test invoices, a known
 // vendor with an account not on file and the Nimbus bill reissued under a new number.
 const DEMO_SET_EXTRAS = ["test-account-mismatch-LL-3104.png", "test-reissued-NH-88317-R.png"];
-const VOICE_SAMPLE = join(HERE, "..", "..", "demo", "voice", "pay-this-weeks-invoices.wav");
+const VOICE_SAMPLE = join(DEMO, "voice", "pay-this-weeks-invoices.wav");
 
 const MAX_FILES = 10;
 const MAX_FILE_BYTES = 15 * 1024 * 1024;
@@ -74,6 +79,7 @@ export class WebApp {
         openAvailable: openAvailable(), openModel: endpoint("muse-spark-open").model,
       });
     }
+    if (req.method === "GET" && path === "/api/lab") return json(res, 200, { scenarios: describeLab(ROOT) });
     if (req.method === "GET" && path === "/api/samples") return json(res, 200, { samples: await sampleNames(), demoSet: (await demoSet()).map((s) => s.name) });
     const sample = path.match(/^\/api\/samples\/([A-Za-z0-9._-]+)$/);
     if (req.method === "GET" && sample) {
@@ -103,13 +109,26 @@ export class WebApp {
     if (origin && origin !== `http://${req.headers.host}`) return json(res, 403, { error: "cross-origin request refused" });
     const raw = await readBody(req, MAX_BODY_BYTES);
     if (raw === null) return json(res, 413, { error: "upload too large" });
-    let body: { goal?: unknown; files?: unknown; samples?: unknown; attackDemo?: unknown; brain?: unknown };
+    let body: { goal?: unknown; files?: unknown; samples?: unknown; attackDemo?: unknown; brain?: unknown; scenario?: unknown };
     try {
       body = JSON.parse(raw);
     } catch {
       return json(res, 400, { error: "bad JSON" });
     }
-    const sources = await this.sources(body);
+    // A Controls Lab scenario brings its own invoices, vendor file and (empty) 24-hour ledger.
+    const lab = body.scenario === undefined ? undefined : labScenario(body.scenario);
+    if (body.scenario !== undefined && !lab) return json(res, 400, { error: "no such scenario" });
+    let labVendors: Vendor[] | undefined;
+    if (lab) {
+      try {
+        labVendors = loadVendorFile(join(ROOT, lab.vendorFile));
+      } catch (err) {
+        return json(res, 500, { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    const sources = lab
+      ? { list: await Promise.all(lab.invoices.map(async (p) => ({ name: p.split("/").pop()!, data: await readFile(join(DEMO, p)) }))) }
+      : await this.sources(body);
     if ("error" in sources) return json(res, 400, { error: sources.error });
     const goal = typeof body.goal === "string" && body.goal.trim() ? body.goal.trim().slice(0, 500) : "Pay these invoices.";
 
@@ -117,9 +136,10 @@ export class WebApp {
     const run: Run = { id: randomUUID(), events: [], listeners: new Set(), finished: false, created: Date.now() };
     this.runs.set(run.id, run);
     this.prune();
-    const agentMode = body.attackDemo === true ? "attack-demo" : "guarded";
+    const agentMode: AgentMode = (lab ? lab.attackDemo : body.attackDemo === true) ? "attack-demo" : "guarded";
     const brain = body.brain === "muse-spark-open" ? "muse-spark-open" : "muse-spark";
-    runAgent({ goal, sources: sources.list, agentMode, brain }, this.gateway, (e) => this.publish(run, e)).finally(() => {
+    const labInput = lab ? { vendors: labVendors, ledger: new MemoryLedger() } : {};
+    runAgent({ goal, sources: sources.list, agentMode, brain, ...labInput }, this.gateway, (e) => this.publish(run, e)).finally(() => {
       run.finished = true;
       for (const l of run.listeners) l.end();
       run.listeners.clear();

@@ -48,8 +48,11 @@ function print(e: RunEvent, mode: "live" | "judge") {
       console.log(`\nHidden payment requests found in invoice text (not followed by the agent):`);
       for (const r of e.requests) console.log(`  ${r.invoice_file}: $${r.amount_usd} to ${r.payee}  "${r.quote}"`);
       break;
+    case "allowances":
+      for (const a of e.allowances) console.log(`\n24-hour limit for ${a.vendor}: $${a.max_24h_usd}, $${a.used_usd} already used (vendor ledger)`);
+      break;
     case "invoices_refused":
-      console.log(`\nLeft out of the limits (Yebo will deny these):`);
+      console.log(`\nLeft out of the limits (these cannot be allowed):`);
       for (const r of e.rejected) console.log(`  ${r.file}: ${r.payee}: ${r.reason}`);
       break;
     case "no_mission":

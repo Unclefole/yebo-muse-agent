@@ -25,6 +25,22 @@
 
   <main class="grid">
     <section class="col">
+      <article class="card lab-card" id="lab-card" hidden>
+        <h2><span class="step">L</span> Controls Lab</h2>
+        <p class="muted">Preset scenarios, each testing one accounts-payable control. One click loads the invoices and the vendor file settings, then runs the agent.</p>
+        <div class="lab-row">
+          <label for="lab-scenario" class="sr-only">Scenario</label>
+          <select id="lab-scenario"></select>
+          <button type="button" class="secondary" id="lab-run">Run scenario</button>
+        </div>
+        <p class="lab-summary" id="lab-summary"></p>
+        <dl class="lab-facts">
+          <dt>Invoices</dt><dd id="lab-invoices"></dd>
+          <dt>Vendor file</dt><dd id="lab-settings"></dd>
+          <dt>Expected</dt><dd id="lab-expect"></dd>
+        </dl>
+      </article>
+
       <article class="card" id="upload-card">
         <h2><span class="step">1</span> Invoices</h2>
         <label class="drop" id="drop">
@@ -101,6 +117,11 @@
         <p class="muted" id="timeline-empty">Each payment Yebo checks shows up here: ALLOW, DENY or REQUIRE_APPROVAL, with the reason and the receipt ID.</p>
         <ol class="timeline" id="timeline"></ol>
         <div class="totals" id="totals" hidden></div>
+        <section class="stopped" id="stopped" hidden>
+          <h3>Which control stopped what</h3>
+          <p class="muted small-note" id="stopped-expect" hidden></p>
+          <ul class="stopped-list" id="stopped-list"></ul>
+        </section>
         <details class="agent-msg" id="agent-msg" hidden>
           <summary>What the agent said</summary>
           <p id="agent-text"></p>

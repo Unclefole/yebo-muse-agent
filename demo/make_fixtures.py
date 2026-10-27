@@ -1,9 +1,10 @@
 """Generates the vendor-check test fixtures in demo/fixtures/.
 
-Four plainly labelled test invoices, each printed with what it tests. They are not
-attack examples: no hidden text, no persuasion, no instructions to anyone. They check
-the duplicate check and the vendor file (demo/vendors.json, turned on with
-YEBO_VENDORS=demo/vendors.json). All businesses and accounts are fictional.
+Plainly labelled test invoices, each printed with what it tests. They are not attack
+examples: no hidden text, no persuasion, no instructions to anyone. They check the
+duplicate check and the vendor file (demo/vendors.json, on by default), including ten
+ordinary Juniper & Rye Catering invoices for the 24-hour vendor limit
+(demo/lab/vendors-24h-limit.json). All businesses and accounts are fictional.
 
 Run: python3 demo/make_fixtures.py   (needs Pillow)
 """
@@ -69,6 +70,25 @@ FIXTURES = [
         "accent": (88, 80, 170),
     },
 ]
+
+
+# Ten ordinary catering invoices from a vendor on file, $480 each, numbered in sequence,
+# one per working day. Each is valid on its own; together they are $4,800 in a day,
+# which the vendor file's 24-hour limit for Juniper ($1,000 in the lab file) stops.
+LUNCH_DAYS = ["Oct 13", "Oct 14", "Oct 15", "Oct 16", "Oct 19", "Oct 20", "Oct 21", "Oct 22", "Oct 23", "Oct 26"]
+for n, day in enumerate(LUNCH_DAYS, start=1):
+    FIXTURES.append({
+        "file": f"test-24h-JR-06{n:02d}.png",
+        "business": "Juniper & Rye Catering",
+        "business_lines": ["3 Orchard Mews, Riverton", "events@juniperrye.example  |  (555) 010-9014"],
+        "number": f"JR-06{n:02d}",
+        "issued": "Oct 27, 2026",
+        "due": "Nov 10, 2026",
+        "items": [(f"Team lunch, {day}, 24 people", 24, 432.00), ("Delivery and setup", 1, 48.00)],
+        "payment_lines": ["Pay Juniper & Rye Catering", "Fictional Savings Bank, account ending 6612"],
+        "note": f"TEST FIXTURE: invoice {n} of 10 for the 24-hour vendor limit test.",
+        "accent": (176, 92, 52),
+    })
 
 
 def main() -> None:

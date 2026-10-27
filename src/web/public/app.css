@@ -161,8 +161,33 @@ dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .brain small { color: var(--muted); font-size: 12px; margin-left: 4px; }
 .brain label.off { opacity: .55; cursor: not-allowed; }
 
+/* Controls Lab */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.lab-card .muted { margin-bottom: 12px; }
+.lab-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.lab-row select { flex: 1 1 200px; min-width: 0; font: inherit; color: var(--ink); background: var(--card-2); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+.lab-row select:focus { outline: 2px solid var(--green); outline-offset: 1px; border-color: transparent; }
+.secondary { flex: none; padding: 10px 16px; border-radius: 10px; border: 1px solid var(--green); background: var(--green-soft); color: var(--green); font-weight: 650; cursor: pointer; }
+.secondary:hover { background: rgba(62, 240, 160, 0.2); }
+.lab-summary { margin: 12px 0 8px; font-size: 14px; color: var(--ink-2); }
+.lab-facts { grid-template-columns: auto minmax(0, 1fr); margin: 0; font-size: 13px; }
+.lab-facts dd { text-align: left; color: var(--ink-2); }
+
+.stopped { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+.stopped h3 { font-size: 14px; margin: 0 0 6px; }
+.small-note { font-size: 13px; margin: 0 0 10px; }
+.stopped-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.stopped-list li { padding: 12px; border-radius: 12px; background: var(--card-2); border: 1px solid var(--line); display: grid; gap: 6px; font-size: 14px; overflow-wrap: anywhere; }
+.stopped-list li.none { color: var(--ink-2); border-color: rgba(62, 240, 160, 0.35); }
+.stopped-list .row { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 10px; color: var(--ink-2); font-size: 13px; }
+.stopped-list .who { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; padding-top: 1px; }
+.stopped-list .who.DENY { color: var(--red); }
+.stopped-list .control { display: block; color: var(--green); font-weight: 600; }
+.stopped-list .control.forced { color: var(--red); }
+
 /* Phones: the time goes above each timeline entry instead of taking a third of the width. */
 @media (max-width: 520px) {
   .timeline li { grid-template-columns: minmax(0, 1fr); gap: 2px 12px; }
   .timeline .sub, .timeline .receipt { grid-column: 1; }
+  .stopped-list .row { grid-template-columns: minmax(0, 1fr); gap: 2px; }
 }
