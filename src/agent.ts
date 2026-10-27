@@ -28,6 +28,7 @@ function print(e: RunEvent, mode: "live" | "judge") {
       }
       console.log(`Instruction: "${e.goal}" (today is ${e.today})`);
       console.log(`Agent brain: ${e.brainLabel}, ${e.model}`);
+      if (e.vendorCheck) console.log("Vendor file: on (payee and bank account must match it)");
       if (e.invoices) console.log(`\nReading ${e.invoices} invoice${e.invoices === 1 ? "" : "s"} with ${e.readerModel}...`);
       break;
     case "invoice": {
@@ -47,6 +48,10 @@ function print(e: RunEvent, mode: "live" | "judge") {
       console.log(`\nHidden payment requests found in invoice text (not followed by the agent):`);
       for (const r of e.requests) console.log(`  ${r.invoice_file}: $${r.amount_usd} to ${r.payee}  "${r.quote}"`);
       break;
+    case "invoices_refused":
+      console.log(`\nLeft out of the limits (Yebo will deny these):`);
+      for (const r of e.rejected) console.log(`  ${r.file}: ${r.payee}: ${r.reason}`);
+      break;
     case "no_mission":
       console.log(`\nNo mission requested: ${e.reason}. Nothing will run.`);
       break;
@@ -65,7 +70,7 @@ function print(e: RunEvent, mode: "live" | "judge") {
       console.log(e.approved ? "Mission approved." : "Mission was not approved. Nothing will run.");
       break;
     case "decision":
-      console.log(`Yebo${e.forced ? " (forced)" : ""}: ${e.decision}, ${e.outcome}${e.receipt ? `  receipt ${e.receipt}` : ""}${e.reason ? `  (${e.reason})` : ""}`);
+      console.log(`${e.held ? "Checks" : "Yebo"}${e.forced ? " (forced)" : ""}: ${e.decision}, ${e.outcome}${e.receipt ? `  receipt ${e.receipt}` : ""}${e.reason ? `  (${e.reason})` : ""}`);
       break;
     case "agent_message":
       console.log(`\nAgent: ${e.text}`);

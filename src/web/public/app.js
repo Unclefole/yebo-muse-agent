@@ -251,6 +251,7 @@ function handle(e) {
     case "started":
       step(`Instruction: “${e.goal}” · today is ${e.today}`);
       step(`Agent brain: ${e.brainLabel} (${e.model})`);
+      if (e.vendorCheck) step("Vendor file on: each payee and bank account must match it");
       $("model-badge").textContent = e.brain === "muse-spark-open" ? `${e.model} (open)` : e.model;
       if (e.agentMode === "attack-demo") {
         step("Attack demo: payment requests hidden in the invoices will be forced through, as if the agent had been hijacked.", "attack-banner");
@@ -261,6 +262,9 @@ function handle(e) {
     case "invoice_error": return addInvoiceError(e.file, e.error);
     case "proposed": return addProposal(e);
     case "hidden_requests": return showHidden(e.requests);
+    case "invoices_refused":
+      for (const r of e.rejected) step(`Left out of the limits: ${r.payee} (${r.file}): ${r.reason}`, "DENY");
+      return;
     case "no_mission": return step(`No mission requested: ${e.reason}. Nothing will run.`);
     case "proposal_refused": return step("Refused a malformed proposal from the model");
     case "mission": return showMission(e);
@@ -378,6 +382,7 @@ function addDecision(d) {
   const what = el("span", "what");
   what.append(el("span", `decision ${d.decision}`, d.decision), document.createTextNode(`${usd(d.proposal.amount_usd)} to ${d.proposal.payee}`));
   if (d.forced) what.append(el("span", "flag", "FORCED"));
+  if (d.held) what.append(el("span", "flag", "HELD BY CHECKS"));
   li.append(el("span", "time", clock()), what);
   li.append(el("span", "sub", d.decision === "ALLOW" ? d.outcome : `${d.outcome}${d.reason ? `: ${d.reason}` : ""}`));
   if (d.receipt) {
