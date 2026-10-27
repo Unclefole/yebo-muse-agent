@@ -202,3 +202,8 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
   - **Main run, 2 runs:** used a `say` recording of "Pay these invoices." through Muse Voice Transcribe (made in a temp folder, not added to the repo). Heard "Pay these invoices."; both test invoices left out; 5 ALLOW; both DENY reasons word for word as in the script.
   - **The twist:** 5 ALLOW and the two forced DENYs, word for word.
   - **Demo set since the repeat fix:** both unforced DENYs in 7 of 8 runs.
+
+## 2026-10-27 (overnight: submission draft)
+
+- `SUBMISSION.md` (draft only, not submitted): name, one-line pitch, a 150-word description (counted), track and problem statement, the Meta models and how they are used, built during the hackathon vs pre-existing, how to run, links, bonus prizes, deadline.
+- Checked cerebralvalley.ai/e/meta-ai-developer-hackathon: the two problem statements are "Build for Your World" and "Push the Frontier"; Startup track judged on technical execution and production readiness; deadline Nov 4, 9:00 PM ET. The page lists no bonus prizes and did not link the Official Rules, so bonus prizes are marked TO CONFIRM (a secondary source mentions community vote / most viral, up to $50,000).
