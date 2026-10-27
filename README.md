@@ -41,8 +41,8 @@ Prefer the terminal? `npm run dev -- demo/invoices` does the same run in the CLI
 1. **Read.** Muse Spark 1.3 reads each invoice image or PDF into JSON (payee, amount, currency, due date, invoice number, payment details, notes) under a strict JSON schema. The answer is validated: payees that look like bank details are refused, written dates are converted, and anything unusable is retried once and then rejected.
 2. **Audit.** A second Muse Spark call lists any payment requests written inside the invoices (prompt injections), with the exact quote. They are shown as red flags and never followed.
 3. **Listen.** Muse Voice Transcribe turns a spoken instruction into text. The browser records and builds the 16 kHz mono WAV itself.
-4. **Plan.** The agent brain (Muse Spark 1.3, or Muse Spark Open on Baseten) calls `propose_payment` once per invoice it decides to pay. It knows today's date, so "this week" means something. Malformed tool calls are refused in code.
-5. **Approve.** The limits are built in code from the invoices the agent chose: their payees, the largest invoice as the per-payment limit, their sum as the total, valid for 15 minutes. The plan can narrow them; nothing can widen them. A human approves them once.
+4. **Plan.** The agent brain (Muse Spark 1.3, or Muse Spark Open on Baseten) calls `propose_payment` once per invoice it decides to pay, over as many turns as it needs; each proposal is only recorded. It knows today's date, so "this week" means something. Malformed tool calls are refused in code.
+5. **Approve.** The limits are built in code from the invoices the agent chose: their payees, the largest invoice as the per-payment limit, their sum as the total, valid for 15 minutes. They are built once the agent has finished planning, so they always cover the whole plan. The plan can narrow them; nothing can widen them. A human approves them once.
 6. **Enforce.** Each payment goes to Yebo, which returns ALLOW (with a receipt ID), DENY (with the reason) or REQUIRE_APPROVAL. Only ALLOW proceeds, as a dry run. The client stops the run if a result ever comes back that is not a dry run.
 
 ## Meta models used
@@ -102,7 +102,7 @@ npm run dev -- demo/invoices --open             # plan with Muse Spark Open (nee
 npm run dev -- path/to/your-invoice.pdf "Pay this one"
 npm run extract -- demo/invoices                # only read the invoices and print the JSON
 npm run check-open                              # check the Muse Spark Open (Baseten) setup
-npm test                                        # 49 tests, no API calls
+npm test                                        # 52 tests, no API calls
 ```
 
 **Pin the date for a repeatable demo:** `YEBO_TODAY=2026-11-02` (a Monday; Brightleaf, Copperline and Ridgeback are due that week, so "pay this week's invoices" selects those three).
@@ -125,7 +125,7 @@ Everything in this repository was built between Oct 26 and Nov 4, 2026. [HACKATH
 - Judge mode: the local stand-in gateway and its simulated approval page
 - The web app with the live decision timeline
 - The duplicate check and the optional vendor file (payee + bank account), with three labelled test invoices
-- Five fictional sample invoices and their generator, the sample voice command, and 49 tests
+- Five fictional sample invoices and their generator, the sample voice command, and 52 tests
 
 **Pre-existing, not part of this submission:** the **Yebo authorization gateway** (`gateway.yebo.dev`) and the **yebo.dev approval page**. This project calls the gateway over the network the same way any customer would; its source is not in this repository. To support this project during the hackathon, small changes were made in the private Yebo repository (an agent-only key that can never approve missions, the approval page taking the approver from the signed-in account, and showing the requesting agent's name and limits); those are not part of this submission either. Judge mode lets you run everything here without them.
 
@@ -134,7 +134,7 @@ Everything in this repository was built between Oct 26 and Nov 4, 2026. [HACKATH
 - **Fail closed everywhere.** Missing limits, a forged or expired mission token, an unknown payee, a malformed model answer, an unsigned request: all refused. The judge gateway requires an HMAC signature on every call, and its approve button needs a per-mission nonce.
 - **Untrusted input stays data.** Invoice text is never followed. Model tool arguments are validated before they reach the gateway. The web page writes all text with `textContent`, serves a strict Content-Security-Policy with no inline scripts, accepts same-origin uploads only, and binds to 127.0.0.1.
 - **No new dependencies.** The web server is Node's built-in `http`; the page is plain HTML, CSS and JavaScript; audio is converted in the browser. Runtime dependency: `dotenv`.
-- **Tested.** `npm test` runs 49 tests with the Meta API mocked: gateway rules, invoice reading and validation, the attack demo, the duplicate and vendor checks, voice, the web app's event stream, and Muse Spark Open routing.
+- **Tested.** `npm test` runs 52 tests with the Meta API mocked: gateway rules, invoice reading and validation, planning before approval, the attack demo, the duplicate and vendor checks, voice, the web app's event stream, and Muse Spark Open routing.
 
 ## Known limitations
 
