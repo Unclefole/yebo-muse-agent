@@ -251,6 +251,7 @@ function handle(e) {
     case "started":
       step(`Instruction: “${e.goal}” · today is ${e.today}`);
       step(`Agent brain: ${e.brainLabel} (${e.model})`);
+      state.vendorCheck = !!e.vendorCheck;
       if (e.vendorCheck) step("Vendor file on: each payee and bank account must match it");
       $("model-badge").textContent = e.brain === "muse-spark-open" ? `${e.model} (open)` : e.model;
       if (e.agentMode === "attack-demo") {
@@ -352,7 +353,7 @@ function showMission(e) {
   $("m-per").textContent = usd(e.limits.per_payment_usd);
   $("m-total").textContent = usd(e.limits.total_usd);
   $("m-source").textContent = e.source === "invoices"
-    ? "Built from the invoices the agent chose to pay, never wider than the invoices themselves. Anything else is refused."
+    ? `Built from the invoices the agent chose to pay, never wider than the invoices themselves.${state.vendorCheck ? " Payees and bank accounts must also be on the vendor file." : ""} Anything else is refused.`
     : "Built from the agent's plan (no invoices in this run).";
   $("m-expires").textContent = new Date(e.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const link = $("approve-link");
