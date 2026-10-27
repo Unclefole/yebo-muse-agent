@@ -5,7 +5,11 @@ import { test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { JudgeGateway } from "../src/judge/gateway.js";
 import { runAgent, type RunEvent } from "../src/runner.js";
+import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { accountEndings, checkInvoices, loadVendors, parseVendors, vendorName, vendorRefusal, type Vendor } from "../src/vendors.js";
+import { FileLedger } from "../src/ledger.js";
 import type { Invoice } from "../src/invoice.js";
 
 const VENDORS: Vendor[] = [
@@ -45,7 +49,7 @@ test("vendor file: payee and every account must match", () => {
 test("duplicates: the same payee and invoice number again is refused, whatever the punctuation", () => {
   const { passed, rejected } = checkInvoices([NIMBUS, NIMBUS_AGAIN, BRIGHTLEAF], null);
   assert.deepEqual(passed, [NIMBUS, BRIGHTLEAF]);
-  assert.deepEqual(rejected, [{ file: "nimbus-again.png", payee: "Nimbus Cloud Hosting", reason: "duplicate of invoice NH-88317 in nimbus.pdf" }]);
+  assert.deepEqual(rejected, [{ file: "nimbus-again.png", payee: "Nimbus Cloud Hosting", amount: 89, control: "duplicate", reason: "duplicate of invoice NH-88317 in nimbus.pdf" }]);
   assert.equal(checkInvoices([{ ...NIMBUS, invoice_number: null }, { ...NIMBUS_AGAIN, invoice_number: null }], null).rejected.length, 0, "no number, no duplicate claim");
 });
 
@@ -81,7 +85,7 @@ test("vendor cap: a vendor is paid at most max_per_run_usd in one run, whatever 
   const capped: Vendor[] = [{ name: "Nimbus Cloud Hosting", accounts: ["3350"], max_per_run_usd: 89 }, VENDORS[1]];
   const { passed, rejected } = checkInvoices([NIMBUS, NIMBUS_REISSUED, BRIGHTLEAF], capped);
   assert.deepEqual(passed, [NIMBUS, BRIGHTLEAF]);
-  assert.deepEqual(rejected, [{ file: "nimbus-reissued.png", payee: "Nimbus Cloud Hosting", reason: "over the vendor file's limit for Nimbus Cloud Hosting: $89 per run ($89 already in this run)" }]);
+  assert.deepEqual(rejected, [{ file: "nimbus-reissued.png", payee: "Nimbus Cloud Hosting", amount: 89, control: "per_run", reason: "over the vendor file's limit for Nimbus Cloud Hosting: $89 per run ($89 already in this run)" }]);
   assert.equal(checkInvoices([NIMBUS, NIMBUS_REISSUED], VENDORS).rejected.length, 0, "without a cap, a reissue under a new number passes");
   assert.equal(checkInvoices([{ ...NIMBUS, amount: 120 }], capped).rejected.length, 1, "one invoice over the cap is refused too");
 });
@@ -94,6 +98,38 @@ test("a malformed vendor file is an error, never a silently disabled check", () 
   assert.throws(() => parseVendors('[{"name":"X","accounts":["12345"]}]'), /last 4 digits/);
   assert.throws(() => parseVendors('[{"accounts":["1234"]}]'), /"name" is required/);
   assert.deepEqual(parseVendors('[{"name":" X ","accounts":["1234"]}]'), [{ name: "X", accounts: ["1234"] }]);
+});
+
+const JUNIPER = (n: number) => inv(`juniper-${n}.png`, "Juniper & Rye Catering", 480, `JR-06${String(n).padStart(2, "0")}`, "Pay Juniper & Rye Catering\nFictional Savings Bank, account ending 6612");
+const JUNIPER_TEN = Array.from({ length: 10 }, (_, i) => JUNIPER(i + 1));
+
+test("vendor file: max_24h_usd and status are validated", () => {
+  assert.deepEqual(parseVendors('[{"name":"X","accounts":["1234"],"max_24h_usd":1000,"status":"inactive"}]'), [{ name: "X", accounts: ["1234"], max_24h_usd: 1000, status: "inactive" }]);
+  assert.throws(() => parseVendors('[{"name":"X","accounts":["1234"],"max_24h_usd":-5}]'), /max_24h_usd/);
+  assert.throws(() => parseVendors('[{"name":"X","accounts":["1234"],"status":"paused"}]'), /"status" must be "active" or "inactive"/);
+});
+
+test("inactive vendor: on file, matching account, still refused", () => {
+  const vendors: Vendor[] = [{ name: "Juniper & Rye Catering", accounts: ["6612"], status: "inactive" }];
+  assert.equal(vendorRefusal(JUNIPER(1), vendors), "Juniper & Rye Catering is inactive on the vendor file");
+  const { passed, rejected } = checkInvoices([JUNIPER(1)], vendors);
+  assert.equal(passed.length, 0);
+  assert.equal(rejected[0].control, "inactive");
+  assert.equal(checkInvoices([JUNIPER(1)], [{ ...vendors[0], status: "active" }]).passed.length, 1);
+});
+
+test("24-hour limit: counts this run and earlier runs; each check names its control", () => {
+  const vendors: Vendor[] = [{ name: "Juniper & Rye Catering", accounts: ["6612"], max_24h_usd: 1000 }];
+  const fresh = checkInvoices(JUNIPER_TEN, vendors);
+  assert.deepEqual(fresh.passed.map((i) => i.invoice_number), ["JR-0601", "JR-0602"]);
+  assert.equal(fresh.rejected.length, 8);
+  assert.ok(fresh.rejected.every((r) => r.control === "24h" && r.amount === 480));
+  assert.equal(fresh.rejected[0].reason, "over the vendor file's 24-hour limit for Juniper & Rye Catering: $1,000 per 24 hours ($960 already used)");
+  const later = checkInvoices(JUNIPER_TEN, vendors, new Map([["Juniper & Rye Catering", 600]]));
+  assert.equal(later.passed.length, 0, "$600 used earlier leaves $400: not enough for one $480 invoice");
+  assert.match(later.rejected[0].reason, /\(\$600 already used\)/);
+  const controls = checkInvoices([NIMBUS, NIMBUS_AGAIN, LARKSPUR_OTHER_ACCOUNT, UNKNOWN], VENDORS).rejected.map((r) => r.control);
+  assert.deepEqual(controls, ["duplicate", "account", "unknown_vendor"]);
 });
 
 // ── Whole runs ──────────────────────────────────────────────────────────────
@@ -144,6 +180,17 @@ after(async () => {
   delete process.env.YEBO_VENDORS;
   await gw.stop();
 });
+
+// A temporary vendor file and ledger for the 24-hour and inactive runs.
+const dir = mkdtempSync(join(tmpdir(), "yebo-vendors-"));
+function vendorFile(name: string, juniper: Partial<Vendor>): string {
+  const path = join(dir, name);
+  writeFileSync(path, JSON.stringify([
+    { name: "Brightleaf Design Studio", accounts: ["4821"] },
+    { name: "Juniper & Rye Catering", accounts: ["6612"], ...juniper },
+  ]));
+  return path;
+}
 
 async function run(): Promise<RunEvent[]> {
   const events: RunEvent[] = [];
@@ -230,4 +277,67 @@ test("a broken vendor file stops the run before anything is paid", async () => {
   const err = ev.find((e) => e.type === "error");
   assert.ok(err && err.type === "error");
   assert.match(err.message, /YEBO_VENDORS \(demo\/no-such-vendors.json\)/);
+});
+
+test("24-hour limit across runs: ten $480 Juniper invoices against $1,000 give 2 ALLOW and 8 Yebo DENY; the ledger carries over", async () => {
+  process.env.YEBO_VENDORS = vendorFile("juniper-24h.json", { max_24h_usd: 1000 });
+  process.env.YEBO_LEDGER = join(dir, "ledger.json");
+  try {
+    batch = JUNIPER_TEN;
+    const ev = await run();
+    const allowances = ev.find((e) => e.type === "allowances");
+    assert.deepEqual(allowances, { type: "allowances", allowances: [{ vendor: "Juniper & Rye Catering", max_24h_usd: 1000, used_usd: 0 }] });
+    const mission = ev.find((e) => e.type === "mission");
+    assert.ok(mission && mission.type === "mission");
+    assert.equal(mission.limits.total_usd, 960, "the remaining allowance is in the limits");
+    const ds = ev.flatMap((e) => (e.type === "decision" ? [e] : []));
+    assert.equal(ds.filter((d) => d.decision === "ALLOW").length, 2);
+    const denied = ds.filter((d) => d.decision === "DENY");
+    assert.equal(denied.length, 8);
+    assert.ok(denied.every((d) => /exceeds the budget left \(0\)/.test(d.reason ?? "")));
+    const ledger = JSON.parse(readFileSync(process.env.YEBO_LEDGER, "utf8"));
+    assert.deepEqual(ledger.map((e: any) => [e.vendor, e.amount_usd]), [["Juniper & Rye Catering", 480], ["Juniper & Rye Catering", 480]]);
+    assert.ok(ledger.every((e: any) => /^rcpt_/.test(e.receipt)));
+
+    // The next run, with Brightleaf too: Juniper's allowance is used up, so it is outside the mission.
+    batch = [BRIGHTLEAF, JUNIPER(11)];
+    const next = await run();
+    assert.deepEqual((next.find((e) => e.type === "allowances") as any).allowances[0].used_usd, 960);
+    assert.deepEqual(outcome(next), ["Brightleaf Design Studio 400 ALLOW", "Juniper & Rye Catering 480 DENY"]);
+    assert.match((next.filter((e) => e.type === "decision").at(-1) as any).reason, /payee 'Juniper & Rye Catering' is not in the approved mission/);
+
+    // After a reset, the allowance starts again.
+    new FileLedger(process.env.YEBO_LEDGER).reset();
+    batch = JUNIPER_TEN;
+    assert.equal(outcome(await run()).filter((o) => o.endsWith("ALLOW")).length, 2);
+  } finally {
+    delete process.env.YEBO_LEDGER;
+  }
+});
+
+test("without a 24-hour limit the ledger is never written", async () => {
+  process.env.YEBO_LEDGER = join(dir, "untouched.json");
+  try {
+    batch = [BRIGHTLEAF];
+    await run();
+    assert.equal(existsSync(process.env.YEBO_LEDGER), false);
+  } finally {
+    delete process.env.YEBO_LEDGER;
+  }
+});
+
+test("inactive vendor: outside the mission, so Yebo denies it; alone, no mission is requested at all", async () => {
+  process.env.YEBO_VENDORS = vendorFile("juniper-inactive.json", { status: "inactive" });
+  batch = [BRIGHTLEAF, JUNIPER(1)];
+  const ev = await run();
+  const refused = ev.find((e) => e.type === "invoices_refused");
+  assert.ok(refused && refused.type === "invoices_refused");
+  assert.equal(refused.rejected[0].control, "inactive");
+  assert.deepEqual(outcome(ev), ["Brightleaf Design Studio 400 ALLOW", "Juniper & Rye Catering 480 DENY"]);
+  assert.match((ev.filter((e) => e.type === "decision").at(-1) as any).reason, /payee 'Juniper & Rye Catering' is not in the approved mission/);
+
+  batch = [JUNIPER(1)];
+  const alone = await run();
+  assert.ok(alone.some((e) => e.type === "no_mission"));
+  assert.deepEqual(outcome(alone), ["Juniper & Rye Catering 480 REQUIRE_APPROVAL"], "nothing is sent to Yebo without a mission");
 });

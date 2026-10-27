@@ -14,7 +14,11 @@ const usd = (n) => `$${Number(n).toLocaleString("en-US", { minimumFractionDigits
 const clock = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
 
 // samples: false (uploaded files), true (the samples) or "demo-set" (the samples plus two test invoices)
-const state = { files: [], samples: false, sampleNames: [], demoSetNames: [], mode: "judge", source: null, results: [] };
+// scenario: the Controls Lab scenario loaded (its own invoices and vendor file), or null
+const state = {
+  files: [], samples: false, sampleNames: [], demoSetNames: [], mode: "judge", source: null, results: [],
+  scenarios: [], scenario: null, runScenario: null, rejected: [],
+};
 
 async function init() {
   try {
@@ -42,9 +46,48 @@ async function init() {
     if (!state.sampleNames.length) $("use-samples").hidden = true;
     $("use-demo-set").textContent = `Use the demo set (${state.demoSetNames.length} invoices)`;
     $("use-demo-set").hidden = !state.demoSetNames.length;
+    initLab((await (await fetch("/api/lab")).json()).scenarios || []);
   } catch {
     showError("Could not reach the local server.");
   }
+}
+
+// ── Controls Lab ────────────────────────────────────────────────────────────
+function initLab(scenarios) {
+  state.scenarios = scenarios;
+  if (!scenarios.length) return;
+  const select = $("lab-scenario");
+  for (const s of scenarios) {
+    const option = el("option", "", s.title);
+    option.value = s.id;
+    select.append(option);
+  }
+  select.addEventListener("change", showScenario);
+  $("lab-run").addEventListener("click", () => {
+    const s = currentScenario();
+    if (!s) return;
+    hideError();
+    state.files = [];
+    state.samples = false;
+    state.scenario = s.id;
+    $("goal").value = "Pay these invoices.";
+    $("attack-demo").checked = s.attackDemo;
+    renderChips();
+    startRun();
+  });
+  showScenario();
+  $("lab-card").hidden = false;
+}
+
+const currentScenario = () => state.scenarios.find((s) => s.id === $("lab-scenario").value);
+
+function showScenario() {
+  const s = currentScenario();
+  if (!s) return;
+  $("lab-summary").textContent = s.summary;
+  $("lab-invoices").textContent = `${s.invoices.length} (${s.invoices.length > 5 ? `${s.invoices[0]} … ${s.invoices.at(-1)}` : s.invoices.join(", ")})`;
+  $("lab-settings").textContent = s.settings.length ? s.settings.join("; ") : `${s.vendorCount} vendors, no extra limits`;
+  $("lab-expect").textContent = `${s.attackDemo ? "Attack demo on. " : ""}${s.expect}`;
 }
 
 // ── Picking invoices ────────────────────────────────────────────────────────
@@ -52,6 +95,7 @@ const ACCEPT = /\.(png|jpe?g|gif|webp|pdf)$/i;
 
 function addFiles(list) {
   state.samples = false;
+  state.scenario = null;
   for (const f of list) {
     if (!ACCEPT.test(f.name)) { showError(`${f.name}: use PNG, JPEG, GIF, WebP or PDF`); continue; }
     if (f.size > 15 * 1024 * 1024) { showError(`${f.name} is larger than 15 MB`); continue; }
@@ -64,7 +108,8 @@ function addFiles(list) {
 function renderChips() {
   const chips = $("chips");
   chips.replaceChildren();
-  const names = state.samples === "demo-set" ? state.demoSetNames : state.samples ? state.sampleNames : state.files.map((f) => f.name);
+  const scenario = state.scenarios.find((s) => s.id === state.scenario);
+  const names = scenario ? scenario.invoices : state.samples === "demo-set" ? state.demoSetNames : state.samples ? state.sampleNames : state.files.map((f) => f.name);
   names.forEach((name, i) => {
     const li = el("li");
     li.append(el("span", "", name));
@@ -72,7 +117,7 @@ function renderChips() {
     x.type = "button";
     x.setAttribute("aria-label", `Remove ${name}`);
     x.addEventListener("click", () => {
-      if (state.samples) { state.samples = false; } else { state.files.splice(i, 1); }
+      if (state.scenario || state.samples) { state.scenario = null; state.samples = false; } else { state.files.splice(i, 1); }
       renderChips();
     });
     li.append(x);
@@ -86,8 +131,8 @@ $("file-input").addEventListener("change", (e) => { hideError(); addFiles(e.targ
 drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("over"); });
 drop.addEventListener("dragleave", () => drop.classList.remove("over"));
 drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("over"); hideError(); addFiles(e.dataTransfer.files); });
-$("use-samples").addEventListener("click", () => { hideError(); state.files = []; state.samples = true; renderChips(); });
-$("use-demo-set").addEventListener("click", () => { hideError(); state.files = []; state.samples = "demo-set"; renderChips(); });
+$("use-samples").addEventListener("click", () => { hideError(); state.files = []; state.scenario = null; state.samples = true; renderChips(); });
+$("use-demo-set").addEventListener("click", () => { hideError(); state.files = []; state.scenario = null; state.samples = "demo-set"; renderChips(); });
 
 function showError(text) { const e = $("upload-error"); e.textContent = text; e.hidden = false; }
 function hideError() { $("upload-error").hidden = true; }
@@ -111,12 +156,14 @@ async function startRun() {
   try {
     const brain = document.querySelector('input[name="brain"]:checked')?.value || "muse-spark";
     const body = { goal: $("goal").value, attackDemo: $("attack-demo").checked, brain };
-    if (state.samples) body.samples = state.samples;
+    if (state.scenario) body.scenario = state.scenario;
+    else if (state.samples) body.samples = state.samples;
     else body.files = await Promise.all(state.files.map(async (f) => ({ name: f.name, data: await toBase64(f) })));
     const res = await fetch("/api/runs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `server returned ${res.status}`);
     resetRun();
+    state.runScenario = state.scenarios.find((s) => s.id === state.scenario) || null;
     listen(data.id);
     run.textContent = "Running…";
   } catch (err) {
@@ -183,7 +230,7 @@ async function transcribeRecording(blob) {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `server returned ${res.status}`);
     $("goal").value = data.transcript;
-    const ready = state.samples || state.files.length;
+    const ready = state.scenario || state.samples || state.files.length;
     voiceStatus(`Heard: “${data.transcript}”${ready ? "" : " Add invoices, then run the agent."}`);
     if (ready && !$("run").disabled) startRun();
   } catch (err) {
@@ -224,8 +271,9 @@ async function toWav16k(blob) {
 function resetRun() {
   if (state.source) state.source.close();
   state.results = [];
-  for (const id of ["invoices", "plan", "timeline", "hidden-list"]) $(id).replaceChildren();
-  for (const id of ["read-card", "hidden-card", "plan-card", "mission", "totals", "agent-msg"]) $(id).hidden = true;
+  state.rejected = [];
+  for (const id of ["invoices", "plan", "timeline", "hidden-list", "stopped-list"]) $(id).replaceChildren();
+  for (const id of ["read-card", "hidden-card", "plan-card", "mission", "totals", "agent-msg", "stopped"]) $(id).hidden = true;
   $("timeline-empty").hidden = false;
   setMissionStatus("wait", "Waiting for your approval…");
 }
@@ -248,7 +296,7 @@ function listen(id) {
 
 function finish() {
   const run = $("run");
-  run.disabled = !(state.samples || state.files.length);
+  run.disabled = !(state.scenario || state.samples || state.files.length);
   run.textContent = "Run the agent again";
 }
 
@@ -269,7 +317,11 @@ function handle(e) {
     case "invoice_error": return addInvoiceError(e.file, e.error);
     case "proposed": return addProposal(e);
     case "hidden_requests": return showHidden(e.requests);
+    case "allowances":
+      for (const a of e.allowances) step(`24-hour limit for ${a.vendor}: ${usd(a.max_24h_usd)}, ${usd(a.used_usd)} already used`);
+      return;
     case "invoices_refused":
+      state.rejected.push(...e.rejected);
       for (const r of e.rejected) step(`Left out of the limits: ${r.payee} (${r.file}): ${r.reason}`, "DENY");
       return;
     case "no_mission": return step(`No mission requested: ${e.reason}. Nothing will run.`);
@@ -285,7 +337,9 @@ function handle(e) {
       $("agent-text").textContent = e.text;
       $("agent-msg").hidden = false;
       break;
-    case "summary": return showTotals(e.results);
+    case "summary":
+      showTotals(e.results);
+      return showStopped(e.results);
     case "error": return step(`Stopped: ${e.message}`, "DENY");
   }
 }
@@ -413,6 +467,55 @@ function showTotals(results) {
   if (counts.DENY) totals.append(el("span", "", `${counts.DENY} denied`));
   if (counts.REQUIRE_APPROVAL) totals.append(el("span", "", `${counts.REQUIRE_APPROVAL} waiting for approval`));
   totals.hidden = false;
+}
+
+// ── Which control stopped what ──────────────────────────────────────────────
+// Each payment that did not go through, with the check in the agent's code that left its
+// invoice out of the limits (if one did) and Yebo's decision. Identical rows are grouped.
+const CONTROL = {
+  duplicate: "Duplicate check",
+  unknown_vendor: "Vendor file: payee not on file",
+  inactive: "Vendor file: inactive vendor",
+  account: "Vendor file: bank account",
+  per_run: "Vendor file: per-run limit",
+  "24h": "Vendor file: 24-hour limit",
+};
+const samePayee = (a, b) => a.replace(/\s+/g, " ").trim().toLowerCase() === b.replace(/\s+/g, " ").trim().toLowerCase();
+
+function showStopped(results) {
+  const scenario = state.runScenario;
+  const expect = $("stopped-expect");
+  expect.hidden = !scenario;
+  if (scenario) expect.textContent = `${scenario.title}. Expected: ${scenario.expect}`;
+  const unused = [...state.rejected];
+  const groups = new Map();
+  for (const r of results.filter((x) => x.decision !== "ALLOW")) {
+    const i = unused.findIndex((x) => samePayee(x.payee, r.proposal.payee) && Math.abs(x.amount - r.proposal.amount_usd) < 0.005);
+    const rejection = i >= 0 ? unused.splice(i, 1)[0] : null;
+    const control = rejection ? CONTROL[rejection.control] || "Agent check" : r.forced ? "Simulated hijack: forced through" : "Mission limits";
+    const agent = rejection ? rejection.reason : "matches no invoice in the approved limits";
+    const yebo = `${r.decision}${r.reason ? `: ${r.reason}` : ""}`;
+    const key = `${r.proposal.payee}|${r.proposal.amount_usd}|${control}|${agent}|${yebo}`;
+    const g = groups.get(key) || { payee: r.proposal.payee, amount: r.proposal.amount_usd, control, agent, yebo, decision: r.decision, forced: !rejection && r.forced, count: 0 };
+    g.count++;
+    groups.set(key, g);
+  }
+  if (!groups.size && !scenario) return;
+  const list = $("stopped-list");
+  for (const g of groups.values()) {
+    const li = el("li");
+    li.append(el("strong", "", `${g.count > 1 ? `${g.count} payments of ` : ""}${usd(g.amount)} to ${g.payee}`));
+    const agent = el("span", "row");
+    const detail = el("span", "");
+    detail.append(el("span", g.forced ? "control forced" : "control", g.control), document.createTextNode(g.agent));
+    agent.append(el("span", "who", "Agent code"), detail);
+    const yebo = el("span", "row");
+    yebo.append(el("span", `who ${g.decision}`, g.decision === "DENY" ? "Yebo gateway" : "Not sent to Yebo"), document.createTextNode(g.yebo));
+    li.append(agent, yebo);
+    list.append(li);
+  }
+  if (!groups.size) list.append(el("li", "none", "Nothing was stopped: every payment was within the approved limits."));
+  $("stopped").hidden = false;
 }
 
 init();

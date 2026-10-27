@@ -10,7 +10,8 @@
     "extract": "tsx src/extract.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "check-open": "tsx src/checkOpen.ts"
+    "check-open": "tsx src/checkOpen.ts",
+    "ledger": "tsx src/ledger.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.5"

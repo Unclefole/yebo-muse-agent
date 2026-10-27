@@ -11,14 +11,17 @@
 // "pay this week's invoices" selects some invoices); a payment that matches no invoice
 // never widens them. A tricked agent can propose anything; it cannot change what is approved.
 // Before approval, src/vendors.ts removes duplicate invoices and invoices whose payee or
-// bank account is not on the vendor file (on by default; YEBO_VENDORS=off turns it off).
-// With the vendor file, the mission's payees are the vendor file's names.
+// bank account is not on the vendor file (on by default; YEBO_VENDORS=off turns it off),
+// whose vendor is inactive, or that would go over a vendor's per-run or 24-hour limit.
+// With the vendor file, the mission's payees are the vendor file's names. Payments Yebo
+// allows to a vendor with a 24-hour limit are recorded in the vendor ledger (src/ledger.ts).
 
 import { chat, endpoint, type Brain, type Message, type Tool } from "./muse.js";
 import { checkPayment, requestMission, waitForApproval, DRY_RUN_OUTCOME, type Decision, type PaymentProposal } from "./yebo.js";
 import { extractInvoiceSource, type Invoice, type InvoiceSource } from "./invoice.js";
 import { findHiddenRequests, type HiddenRequest } from "./injection.js";
-import { accountEndings, checkInvoices, loadVendors, vendorName, type Rejection, type Vendor } from "./vendors.js";
+import { accountEndings, capRefusal, checkInvoices, loadVendors, vendorFor, vendorName, type Rejection, type Vendor } from "./vendors.js";
+import { DAY_MS, fileLedger, type Ledger } from "./ledger.js";
 import type { GatewayMode } from "./gatewayMode.js";
 
 const MISSION_TTL_MS = 15 * 60_000;
@@ -55,6 +58,8 @@ export type RunEvent =
   | { type: "proposed"; id: string; proposal: PaymentProposal; matchesInvoice: boolean | null; forced?: boolean }
   | { type: "hidden_requests"; requests: HiddenRequest[] }
   | { type: "proposal_refused"; raw: string }
+  // what each vendor with a 24-hour limit has already used, before the checks
+  | { type: "allowances"; allowances: { vendor: string; max_24h_usd: number; used_usd: number }[] }
   // chosen invoices left out of the limits: duplicates, or not matching the vendor file
   | { type: "invoices_refused"; rejected: Rejection[] }
   | { type: "mission"; requestId: string; authorizeUrl: string; limits: MissionLimits; source: "invoices" | "proposals"; expiresAt: string; requiredApprovals: number }
@@ -170,12 +175,18 @@ function onFile(payee: string, vendors: Vendor[] | null): string | null {
 }
 
 // Limits for a plain instruction with no invoices: from the plan, and with the vendor file
-// only the proposals whose payee is on it (under the file's names). Null if none is.
-function planLimits(proposals: PaymentProposal[], vendors: Vendor[] | null): MissionLimits | null {
+// only the proposals whose payee is on it, active and within its limits (under the file's
+// names). Null if none is.
+function planLimits(proposals: PaymentProposal[], vendors: Vendor[] | null, last24h: ReadonlyMap<string, number>): MissionLimits | null {
   if (!vendors) return proposals.length ? limitsFor(proposals) : null;
+  const paid = new Map<string, number>();
   const known = proposals.flatMap((p) => {
-    const name = vendorName(p.payee, vendors);
-    return name ? [{ ...p, payee: name }] : [];
+    const vendor = vendorFor(p.payee, vendors);
+    if (!vendor || vendor.status === "inactive") return [];
+    const before = paid.get(vendor.name) ?? 0;
+    if (capRefusal(vendor, p.amount_usd, before, last24h.get(vendor.name) ?? 0)) return [];
+    paid.set(vendor.name, before + p.amount_usd);
+    return [{ ...p, payee: vendor.name }];
   });
   return known.length ? limitsFor(known) : null;
 }
@@ -237,14 +248,19 @@ async function approveMission(goal: string, limits: MissionLimits, source: "invo
   return token ?? "";
 }
 
-export type RunInput = { goal: string; sources: InvoiceSource[]; agentMode?: AgentMode; brain?: Brain };
+// vendors: use this vendor file instead of YEBO_VENDORS (null: off). ledger: record 24-hour
+// spend here instead of the vendor ledger file (the Controls Lab gives each run its own).
+export type RunInput = { goal: string; sources: InvoiceSource[]; agentMode?: AgentMode; brain?: Brain; vendors?: Vendor[] | null; ledger?: Ledger };
 
 export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit): Promise<DecisionResult[]> {
   const results: DecisionResult[] = [];
   const agentMode: AgentMode = input.agentMode ?? "guarded";
   try {
     const date = today();
-    const vendors = loadVendors();
+    const vendors = input.vendors !== undefined ? input.vendors : loadVendors();
+    // Only vendors with a 24-hour limit need the ledger; without one it is never touched.
+    const limited = vendors?.filter((v) => v.max_24h_usd !== undefined) ?? [];
+    const ledger: Ledger | null = limited.length ? input.ledger ?? fileLedger() : null;
     const brain: Brain = input.brain ?? "muse-spark";
     const ep = endpoint(brain);
     emit({
@@ -335,21 +351,32 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
     // the budget left is zero, and Yebo denies it.
     const unpaid: Invoice[] = [];
     if (!missionToken && (proposals.length || forced.length)) {
+      const last24h = ledger ? ledger.spentSince(Date.now() - DAY_MS) : new Map<string, number>();
+      if (limited.length) {
+        emit({ type: "allowances", allowances: limited.map((v) => ({ vendor: v.name, max_24h_usd: v.max_24h_usd!, used_usd: last24h.get(v.name) ?? 0 })) });
+      }
       let chosen: Invoice[] = [];
       if (invoices.length) {
-        const checked = checkInvoices(selectedInvoices(invoices, proposals), vendors);
+        const checked = checkInvoices(selectedInvoices(invoices, proposals), vendors, last24h);
         if (checked.rejected.length) emit({ type: "invoices_refused", rejected: checked.rejected });
         chosen = checked.passed;
         unpaid.push(...checked.passed);
       }
       const limits = invoices.length
         ? limitsFromInvoices(chosen.map((i) => ({ ...i, payee: onFile(i.payee, vendors) ?? i.payee })))
-        : planLimits(proposals, vendors);
+        : planLimits(proposals, vendors, last24h);
       if (limits) missionToken = await approveMission(input.goal, limits, invoices.length ? "invoices" : "proposals", emit);
       else emit({ type: "no_mission", reason: invoices.length ? "the plan matches none of the invoices that can be paid in USD and pass the checks" : "the plan names no payee on the vendor file" });
     }
     // What goes to Yebo: the vendor file's name for the payee, when it has one.
     const toYebo = (p: PaymentProposal): PaymentProposal => ({ ...p, payee: onFile(p.payee, vendors) ?? p.payee });
+    // Each ALLOW to a vendor with a 24-hour limit counts against it in later runs.
+    const recordSpend = (p: PaymentProposal, r: { decision: Decision; receipt?: string }) => {
+      const vendor = vendors ? vendorFor(p.payee, vendors) : undefined;
+      if (ledger && r.decision === "ALLOW" && vendor?.max_24h_usd !== undefined) {
+        ledger.record({ vendor: vendor.name, amount_usd: p.amount_usd, at: new Date().toISOString(), ...(r.receipt ? { receipt: r.receipt } : {}) });
+      }
+    };
 
     // 4. Every proposal is checked by Yebo: first the agent's proposals that pay an approved
     //    invoice, then its other proposals, then the forced ones.
@@ -364,12 +391,14 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
     }
     for (const { id, proposal } of [...first, ...after]) {
       const r = await checkPayment(missionToken, toYebo(proposal));
+      recordSpend(proposal, r);
       const result: DecisionResult = { id, proposal, decision: r.decision, outcome: r.outcome, reason: r.reason, receipt: r.receipt };
       results.push(result);
       emit({ type: "decision", ...result });
     }
     for (const f of forced) {
       const r = await checkPayment(missionToken, toYebo(f.proposal));
+      recordSpend(f.proposal, r);
       const result: DecisionResult = { id: f.id, proposal: f.proposal, forced: true, decision: r.decision, outcome: r.outcome, reason: r.reason, receipt: r.receipt };
       results.push(result);
       emit({ type: "decision", ...result });
