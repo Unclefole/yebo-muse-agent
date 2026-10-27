@@ -185,3 +185,20 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - Web app: a "Use the demo set (7 invoices)" link next to "Use the 5 sample invoices". It loads the 5 samples plus two labelled test invoices from `demo/fixtures/` (`test-account-mismatch-LL-3104.png`, `test-reissued-NH-88317-R.png`), so the video's run can be reproduced in one click. `POST /api/runs` takes `samples: "demo-set"`; `/api/samples` also lists the demo set; the link is hidden if a file is missing.
 - Test: a demo-set run through the real web server and judge gateway (7 invoices read; both test invoices left out of the limits; 5 ALLOW; DENY for Larkspur "not in the approved mission" and for the second Nimbus "exceeds the budget left (0)"). The web test's fake planner now proposes only the invoices the run read. 62 tests.
 - Live (judge mode, Muse Spark 1.3, unforced): the same result in the browser.
+
+## 2026-10-27 (overnight: README and demo script accuracy pass)
+
+- README checked against the code:
+  - **Quick start:** now starts with the one-click demo set and says what to expect (5 ALLOW, two Yebo DENYs; one DENY if Muse skips the superseded copy).
+  - **How it works:** the limits come from the invoices that pass the vendor, account, duplicate and cap checks, under the vendor file's names; planning records a repeated proposal once; payments for approved invoices go to Yebo first, and with no approved mission the client reports REQUIRE_APPROVAL without sending anything.
+  - **New "Who checks what" table:** Yebo checks the signature, approval, expiry, payee, per-payment limit, budget and currency. The agent's code checks invoice validation, the vendor file and bank accounts, duplicates, caps, how the limits are built, and the dry-run guard. Each row matches the code.
+  - **Other fixes:** test count 59 → 62; the demo set listed as built during the hackathon; the Nimbus behaviour now cites the measured runs, not one run.
+- `DEMO_SCRIPT.md` rewritten for the new video flow:
+  - **Main run:** the demo set with the instruction "Pay these invoices.". The two "Left out of the limits" lines, the approval, then 5 ALLOW and two unforced Yebo DENYs (Larkspur "not in the approved mission"; second Nimbus "exceeds the budget left (0)").
+  - **The twist:** the forced attack demo on the 5 samples. Muse Spark Open is optional.
+  - **Pre-recording note:** the bundled voice sample says "this week's" and must not be used for the main run.
+  - **New fallback:** what to do when Muse skips the superseded copy.
+- Verified live, judge mode, Muse Spark 1.3:
+  - **Main run, 2 runs:** used a `say` recording of "Pay these invoices." through Muse Voice Transcribe (made in a temp folder, not added to the repo). Heard "Pay these invoices."; both test invoices left out; 5 ALLOW; both DENY reasons word for word as in the script.
+  - **The twist:** 5 ALLOW and the two forced DENYs, word for word.
+  - **Demo set since the repeat fix:** both unforced DENYs in 7 of 8 runs.
