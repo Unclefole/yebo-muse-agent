@@ -38,7 +38,6 @@ export type DecisionResult = {
   id: string; // proposal id, e.g. "p1"
   proposal: PaymentProposal;
   forced?: boolean; // attack demo: forced through, not proposed by the agent
-  held?: boolean; // stopped by the duplicate or vendor check before reaching Yebo
   decision: Decision;
   outcome: string;
   reason?: string;
@@ -302,14 +301,12 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
     //    instruction, from the plan. With the vendor file, only its vendors can be payees,
     //    under its names. Anything outside the limits is denied by Yebo.
     let missionToken = process.env.YEBO_MISSION_TOKEN ?? ""; // reuse an approved mission if given
-    // Yebo sees payee, amount and the budget left, not which invoice a payment is for. So
-    // each invoice that passed the checks pays for one proposal at most. A proposal that
-    // matches only a refused invoice goes to Yebo, which denies it when its payee is outside
-    // the mission; it is held here only when its payee is in the mission for another invoice
-    // (Yebo would allow it and use up that invoice's budget).
+    // Yebo sees payee, amount and the budget left, not which invoice a payment is for. The
+    // budget is the sum of the invoices that passed the checks, so each of them pays for one
+    // proposal, and those go to Yebo first; every other proposal (a duplicate, an invoice
+    // over a vendor's cap, anything matching no approved invoice) goes after them, when
+    // the budget left is zero, and Yebo denies it.
     const unpaid: Invoice[] = [];
-    const refused: { invoice: Invoice; reason: string }[] = [];
-    let missionPayees: string[] = [];
     if (!missionToken && (proposals.length || forced.length)) {
       let chosen: Invoice[] = [];
       if (invoices.length) {
@@ -317,29 +314,30 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
         if (checked.rejected.length) emit({ type: "invoices_refused", rejected: checked.rejected });
         chosen = checked.passed;
         unpaid.push(...checked.passed);
-        for (const r of checked.rejected) refused.push({ invoice: invoices.find((i) => i.file === r.file)!, reason: r.reason });
       }
       const limits = invoices.length
         ? limitsFromInvoices(chosen.map((i) => ({ ...i, payee: onFile(i.payee, vendors) ?? i.payee })))
         : planLimits(proposals, vendors);
-      if (limits) {
-        missionPayees = limits.payees;
-        missionToken = await approveMission(input.goal, limits, invoices.length ? "invoices" : "proposals", emit);
-      } else emit({ type: "no_mission", reason: invoices.length ? "the plan matches none of the invoices that can be paid in USD and pass the checks" : "the plan names no payee on the vendor file" });
+      if (limits) missionToken = await approveMission(input.goal, limits, invoices.length ? "invoices" : "proposals", emit);
+      else emit({ type: "no_mission", reason: invoices.length ? "the plan matches none of the invoices that can be paid in USD and pass the checks" : "the plan names no payee on the vendor file" });
     }
     // What goes to Yebo: the vendor file's name for the payee, when it has one.
     const toYebo = (p: PaymentProposal): PaymentProposal => ({ ...p, payee: onFile(p.payee, vendors) ?? p.payee });
 
-    // 4. Every proposal is checked: the agent's first, in order, then the forced ones.
-    for (const { id, proposal } of planned) {
-      const slot = unpaid.findIndex((i) => sameAs(proposal, i));
-      if (slot >= 0) unpaid.splice(slot, 1);
-      const refusal = slot < 0 ? refused.find((x) => sameAs(proposal, x.invoice)) : undefined;
-      const hold = refusal && missionPayees.includes(toYebo(proposal).payee) ? refusal : undefined;
-      const r = hold
-        ? { decision: "DENY" as Decision, outcome: "held, not sent to Yebo", reason: hold.reason, receipt: undefined }
-        : await checkPayment(missionToken, toYebo(proposal));
-      const result: DecisionResult = { id, proposal, ...(hold ? { held: true } : {}), decision: r.decision, outcome: r.outcome, reason: r.reason, receipt: r.receipt };
+    // 4. Every proposal is checked by Yebo: first the agent's proposals that pay an approved
+    //    invoice, then its other proposals, then the forced ones.
+    const first: typeof planned = [];
+    const after: typeof planned = [];
+    for (const p of planned) {
+      const slot = unpaid.findIndex((i) => sameAs(p.proposal, i));
+      if (slot >= 0) {
+        unpaid.splice(slot, 1);
+        first.push(p);
+      } else after.push(p);
+    }
+    for (const { id, proposal } of [...first, ...after]) {
+      const r = await checkPayment(missionToken, toYebo(proposal));
+      const result: DecisionResult = { id, proposal, decision: r.decision, outcome: r.outcome, reason: r.reason, receipt: r.receipt };
       results.push(result);
       emit({ type: "decision", ...result });
     }

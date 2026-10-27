@@ -70,7 +70,7 @@ function print(e: RunEvent, mode: "live" | "judge") {
       console.log(e.approved ? "Mission approved." : "Mission was not approved. Nothing will run.");
       break;
     case "decision":
-      console.log(`${e.held ? "Checks" : "Yebo"}${e.forced ? " (forced)" : ""}: ${e.decision}, ${e.outcome}${e.receipt ? `  receipt ${e.receipt}` : ""}${e.reason ? `  (${e.reason})` : ""}`);
+      console.log(`Yebo${e.forced ? " (forced)" : ""}: ${e.decision}, ${e.outcome}${e.receipt ? `  receipt ${e.receipt}` : ""}${e.reason ? `  (${e.reason})` : ""}`);
       break;
     case "agent_message":
       console.log(`\nAgent: ${e.text}`);

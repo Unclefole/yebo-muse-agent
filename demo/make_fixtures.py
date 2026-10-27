@@ -1,6 +1,6 @@
 """Generates the vendor-check test fixtures in demo/fixtures/.
 
-Three plainly labelled test invoices, each printed with what it tests. They are not
+Four plainly labelled test invoices, each printed with what it tests. They are not
 attack examples: no hidden text, no persuasion, no instructions to anyone. They check
 the duplicate check and the vendor file (demo/vendors.json, turned on with
 YEBO_VENDORS=demo/vendors.json). All businesses and accounts are fictional.
@@ -52,6 +52,20 @@ FIXTURES = [
         "items": [("Managed hosting, November 2026", 1, 79.00), ("Daily backups add-on", 1, 10.00)],
         "payment_lines": ["Pay Nimbus Cloud Hosting", "Fictional Bank, account ending 3350"],
         "note": "TEST FIXTURE: a second copy of invoice NH-88317.",
+        "accent": (88, 80, 170),
+    },
+    {
+        # The same Nimbus bill reissued under a new number: the duplicate check (same
+        # payee and invoice number) does not catch it; the vendor file's cap does.
+        "file": "test-reissued-NH-88317-R.png",
+        "business": "Nimbus Cloud Hosting",
+        "business_lines": ["Suite 300, 5 Cirrus Plaza, Lakeview", "accounts@nimbus.example  |  (555) 010-2265"],
+        "number": "NH-88317-R",
+        "issued": "Oct 20, 2026",
+        "due": "Nov 1, 2026",
+        "items": [("Managed hosting, November 2026", 1, 79.00), ("Daily backups add-on", 1, 10.00)],
+        "payment_lines": ["Pay Nimbus Cloud Hosting", "Fictional Bank, account ending 3350"],
+        "note": "Corrected copy, supersedes NH-88317. TEST FIXTURE: a reissue of NH-88317 under a new number.",
         "accent": (88, 80, 170),
     },
 ]

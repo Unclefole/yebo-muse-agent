@@ -151,3 +151,13 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 ## 2026-10-26 (approval box wording)
 
 - Web app: with the vendor file on, the limits box now also says "Payees and bank accounts must also be on the vendor file." (it only said the limits were built from the invoices).
+
+## 2026-10-26 (reissued invoices, vendor caps, payments at the same instant)
+
+- New labelled fixture `demo/fixtures/test-reissued-NH-88317-R.png`: the Nimbus bill under a new number, noted "Corrected copy, supersedes NH-88317." Muse Spark 1.3 read it as Nimbus Cloud Hosting, $89, #NH-88317-R, with that note.
+- Gap: run together with NH-88317 three times, Muse proposed both every time (its memo once said "reissue superseding NH-88317"); both were paid in 2 of 3 runs. The duplicate check only matches the same invoice number.
+- `demo/vendors.json` takes an optional `max_per_run_usd` per vendor (Nimbus: 89). `src/vendors.ts` leaves an invoice out of the limits when it would take a vendor past its cap.
+- The live Yebo mission has no per-payee cap for payments (unit caps exist only for non-payment capabilities; read on yebo origin/main, nothing copied). So the cap works through the budget: `src/runner.ts` sends the proposals that pay an approved invoice to Yebo first, then all others, when the budget left is exactly zero, so Yebo denies them. This replaces holding payments in code: every decision is now Yebo's, and the HELD BY CHECKS label is gone.
+- Retest, 3 runs: one ALLOW and one DENY "amount 89 exceeds the budget left (0)" each time. With all samples and fixtures, Muse proposed only the corrected copy (paid); Larkspur and the unknown vendor were denied as before.
+- Payments at the same instant: a judge-gateway test sends two identical execute calls at once (one ALLOW, one DENY) and ten at once against a budget for three (three ALLOW). The judge gateway checks and debits in one synchronous step. Verified by reading yebo origin/main (nothing copied): the live gateway serializes each mission's payments with a per-mission lock and debits the budget through an atomic ledger (a conditional Postgres UPDATE when DATABASE_URL is set; in memory otherwise). Whether production has DATABASE_URL set was not checked. README says so.
+- Regression runs (vendor file on): normal 5 ALLOW; voice 3 ALLOW, $1,890; attack demo 5 ALLOW and 2 forced DENY, same reasons. 59 tests.
