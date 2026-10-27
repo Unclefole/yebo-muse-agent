@@ -24,6 +24,7 @@ import type { GatewayMode } from "./gatewayMode.js";
 const MISSION_TTL_MS = 15 * 60_000;
 const MAX_STEPS = 8;
 const PLANNING_NOTE = "Recorded. Propose any other payments, then stop; Yebo checks the whole plan once you are done.";
+const REPEAT_NOTE = "Already recorded in an earlier turn; not recorded again. Planning is complete.";
 
 export type MissionLimits = { payees: string[]; per_payment_usd: number; total_usd: number; currency: "USD" };
 
@@ -137,6 +138,16 @@ export function limitsFromInvoices(invoices: Invoice[]): MissionLimits | null {
 }
 
 const sameAs = (p: PaymentProposal, i: Invoice) => i.currency === "USD" && i.payee === p.payee && Math.abs(i.amount - p.amount_usd) < 0.005;
+
+// The invoice number a proposal's memo names, if any: the longest invoice number that
+// appears in it, so "NH-88317-R" is not mistaken for "NH-88317".
+function invoiceRef(memo: string, invoices: Invoice[]): string {
+  const upper = memo.toUpperCase();
+  return invoices
+    .map((i) => i.invoice_number ?? "")
+    .filter((n) => n && upper.includes(n.toUpperCase()))
+    .sort((a, b) => b.length - a.length)[0] ?? "";
+}
 
 export function matchesInvoice(p: PaymentProposal, invoices: Invoice[]): boolean {
   return invoices.some((i) => sameAs(p, i));
@@ -254,6 +265,13 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
     //    so the limits always cover the whole plan, not just its first turn.
     let next = 1;
     const planned: { id: string; proposal: PaymentProposal }[] = [];
+    // Models sometimes propose the whole plan again in a later turn. A proposal with the
+    // same payee, amount and invoice number as one recorded in an earlier turn is not
+    // recorded again, and a turn made only of such repeats ends planning. (Two invoices
+    // from one vendor for the same amount have different numbers, so both still count.)
+    const recorded = new Set<string>();
+    // Without invoices there are no invoice numbers to go by, so the memo itself is used.
+    const keyOf = (p: PaymentProposal) => `${p.payee.toLowerCase()}|${p.amount_usd}|${invoices.length ? invoiceRef(p.memo, invoices) : p.memo.trim().toLowerCase()}`;
     const messages: Message[] = [
       { role: "system", content: GUARDED },
       { role: "user", content: userContent },
@@ -264,9 +282,17 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
       // Only the standard fields go back into the conversation (providers differ in extras).
       messages.push({ role: "assistant", content: reply.content ?? null, ...(reply.tool_calls?.length ? { tool_calls: reply.tool_calls } : {}) });
       if (!reply.tool_calls?.length) break;
+      const earlier = new Set(recorded);
+      let fresh = 0;
       for (const call of reply.tool_calls) {
         const proposal = parseProposal(call.function.arguments);
+        if (proposal && earlier.has(keyOf(proposal))) {
+          messages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify({ status: "not recorded", note: REPEAT_NOTE }) });
+          continue;
+        }
         if (proposal) {
+          fresh++;
+          recorded.add(keyOf(proposal));
           const id = `p${next++}`;
           planned.push({ id, proposal });
           emit({ type: "proposed", id, proposal, matchesInvoice: invoices.length ? matchesInvoice(proposal, invoices) : null });
@@ -276,6 +302,7 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
           content: JSON.stringify(proposal ? { status: "recorded", note: PLANNING_NOTE } : { decision: "DENY", outcome: "denied", reason: "malformed proposal" }),
         });
       }
+      if (!fresh) break; // only repeats (or malformed calls): the plan is complete
     }
     const proposals = planned.map((p) => p.proposal);
 
