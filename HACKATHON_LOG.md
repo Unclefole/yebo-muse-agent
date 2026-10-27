@@ -161,3 +161,10 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - Retest, 3 runs: one ALLOW and one DENY "amount 89 exceeds the budget left (0)" each time. With all samples and fixtures, Muse proposed only the corrected copy (paid); Larkspur and the unknown vendor were denied as before.
 - Payments at the same instant: a judge-gateway test sends two identical execute calls at once (one ALLOW, one DENY) and ten at once against a budget for three (three ALLOW). The judge gateway checks and debits in one synchronous step. Verified by reading yebo origin/main (nothing copied): the live gateway serializes each mission's payments with a per-mission lock and debits the budget through an atomic ledger (a conditional Postgres UPDATE when DATABASE_URL is set; in memory otherwise). Whether production has DATABASE_URL set was not checked. README says so.
 - Regression runs (vendor file on): normal 5 ALLOW; voice 3 ALLOW, $1,890; attack demo 5 ALLOW and 2 forced DENY, same reasons. 59 tests.
+
+## 2026-10-27 (overnight: repeated proposals)
+
+- Found while measuring the 7-invoice demo set (5 samples + Larkspur + reissued Nimbus), 5 live runs: in one run Muse Spark re-proposed all 6 payments in a second planning turn after hearing "recorded". Yebo denied all 6 repeats (the budget was already used), so nothing extra was allowed, but the timeline showed 6 extra DENYs.
+- `src/runner.ts`: a proposal with the same payee, amount and invoice number (read from its memo; the longest matching number, so NH-88317-R is not NH-88317) as one recorded in an earlier turn is not recorded again, and a turn of only repeats ends planning. Without invoices the memo text is used. Two invoices from one vendor for the same amount still count separately.
+- Tests: 61 (a model that repeats its whole plan; two same-amount invoices from one vendor across turns).
+- Live after the fix: 7-invoice set 5 runs: 4 × (7 proposed, 5 ALLOW, 2 DENY), 1 × (6 proposed: Muse skipped the superseded Nimbus copy itself; 5 ALLOW, 1 DENY). Normal 5 ALLOW, voice 3 ALLOW, attack demo 5 ALLOW + 2 forced DENY.

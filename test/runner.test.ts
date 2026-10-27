@@ -143,3 +143,51 @@ test("with the vendor file on, an invoice read without an account number is read
     globalThis.fetch = realMeta;
   }
 });
+
+test("a model that proposes the whole plan again in a later turn: the repeats are not recorded and planning ends", async () => {
+  perTurn = 3;
+  const realMeta = globalThis.fetch;
+  let planningTurns = 0;
+  // Every planning turn proposes all three invoices again (memos worded differently).
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    if (String(url).startsWith(META) && body?.tools && !body.response_format) {
+      planningTurns++;
+      const tool_calls = INVOICES.map((i, n) => ({ id: `t${planningTurns}-${n}`, type: "function", function: { name: "propose_payment", arguments: JSON.stringify({ payee: i.payee, amount_usd: i.amount, memo: `${planningTurns === 1 ? "Invoice" : "Pay invoice"} ${i.invoice_number}` }) } }));
+      return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: null, tool_calls } }] }), { status: 200 });
+    }
+    return realMeta(url, init);
+  }) as typeof fetch;
+  try {
+    const ev = await run();
+    assert.equal(planningTurns, 2, "the second turn was all repeats, so planning stopped");
+    assert.equal(ev.filter((e) => e.type === "proposed").length, 3);
+    assert.deepEqual(ev.flatMap((e) => (e.type === "decision" ? [e.decision] : [])), ["ALLOW", "ALLOW", "ALLOW"]);
+  } finally {
+    globalThis.fetch = realMeta;
+  }
+});
+
+test("two invoices from one vendor for the same amount are both recorded, even across turns", async () => {
+  const realMeta = globalThis.fetch;
+  let turn = 0;
+  const nimbus = (n: string) => ({ payee: "Nimbus Cloud Hosting", amount_usd: 89, memo: `Invoice ${n}` });
+  globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+    const body = init?.body ? JSON.parse(String(init.body)) : null;
+    if (String(url).startsWith(META) && body?.tools && !body.response_format) {
+      turn++;
+      const plan = turn === 1 ? [nimbus("NH-88317")] : turn === 2 ? [nimbus("NH-88317-R")] : [];
+      const tool_calls = plan.map((p, n) => ({ id: `u${turn}-${n}`, type: "function", function: { name: "propose_payment", arguments: JSON.stringify(p) } }));
+      const message = tool_calls.length ? { role: "assistant", content: null, tool_calls } : { role: "assistant", content: "Done." };
+      return new Response(JSON.stringify({ choices: [{ message }] }), { status: 200 });
+    }
+    return realMeta(url, init);
+  }) as typeof fetch;
+  try {
+    const events: RunEvent[] = [];
+    await runAgent({ goal: "Pay Nimbus.", sources: [] }, { mode: "judge", url: process.env.YEBO_GATEWAY_URL!, stop: async () => {} }, (e) => events.push(e));
+    assert.equal(events.filter((e) => e.type === "proposed").length, 2);
+  } finally {
+    globalThis.fetch = realMeta;
+  }
+});
