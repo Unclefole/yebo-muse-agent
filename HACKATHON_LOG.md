@@ -147,3 +147,7 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - Muse Spark 1.3 read the fixtures faithfully: Larkspur "Fictional Bank, account ending 0000", the unknown vendor "account ending 0001", the duplicate "account ending 3350".
 - Tests: 56 (default on and `off`, the vendor file's spelling, real DENY for payees and accounts not on file, the duplicate still held, plain instructions, the re-read). The web app and runner tests now give their mocked invoices the vendor file's accounts.
 - Live, judge mode, dry run, date pinned to Nov 2, vendor file on: normal 5 ALLOW; voice 3 ALLOW, limits $1,890 (twice after the re-read change); attack demo on Muse Spark 1.3 and Muse Spark Open 5 ALLOW and 2 forced DENY, same reasons; samples + fixtures 5 ALLOW, Larkspur and the unknown vendor DENY by Yebo. With `YEBO_VENDORS=off`: 7 ALLOW.
+
+## 2026-10-26 (approval box wording)
+
+- Web app: with the vendor file on, the limits box now also says "Payees and bank accounts must also be on the vendor file." (it only said the limits were built from the invoices).
