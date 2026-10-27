@@ -113,6 +113,8 @@ dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .decision.REQUIRE_APPROVAL { color: var(--slate); background: var(--slate-soft); }
 .timeline li.ALLOW { border-color: rgba(62, 240, 160, 0.35); }
 .timeline li.DENY { border-color: rgba(255, 93, 108, 0.45); }
+/* A DENY's reason is what people need to read: brighter and a little larger than other notes. */
+.timeline li.DENY .sub { color: var(--ink-2); font-size: 14px; }
 
 .totals { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 8px; }
 .totals span { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); }
@@ -157,3 +159,9 @@ dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
 .brain input { accent-color: var(--green); }
 .brain small { color: var(--muted); font-size: 12px; margin-left: 4px; }
 .brain label.off { opacity: .55; cursor: not-allowed; }
+
+/* Phones: the time goes above each timeline entry instead of taking a third of the width. */
+@media (max-width: 520px) {
+  .timeline li { grid-template-columns: minmax(0, 1fr); gap: 2px 12px; }
+  .timeline .sub, .timeline .receipt { grid-column: 1; }
+}

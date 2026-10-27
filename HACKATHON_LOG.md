@@ -173,3 +173,9 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 
 - Cloned the repo into a temp folder and followed the README with only `META_API_KEY` in `.env` (Node 22.17.1): `npm ci` (0 vulnerabilities), `npm run web`, the 5 samples (5 ALLOW), the attack demo (5 ALLOW, 2 forced DENY), the sample voice file served, `npm run dev -- demo/invoices` (5 ALLOW), `npm test` (61 pass).
 - Two README gaps found and fixed: "pay this week's invoices" depends on the real date (on Oct 27 it would pick only Nimbus), so step 5 now says how to pin it (`YEBO_TODAY=2026-11-02`); and the app fails with EADDRINUSE when port 3000 or 4400 is taken (it was during the test), so the README now shows `WEB_PORT` / `YEBO_JUDGE_PORT`.
+
+## 2026-10-27 (overnight: web app at phone width)
+
+- Checked the layout below 860 px. Chrome would not size the window below about 578 px here and the app forbids framing (`frame-ancestors 'none'`), so phone widths were emulated in the live page (body at 390 and 360 px with the one-column rules applied) after a full attack-demo run: one column, nothing wider than the screen, no yellow anywhere (app CSS and the judge approval page only use green, red, blue and greys).
+- Two small CSS fixes in `src/web/public/app.css`: a DENY's reason is now `--ink-2` at 14 px instead of muted grey at 13 px, so it reads clearly on screen; under 520 px the timeline's time goes above each entry instead of taking about a third of the width.
+- Live (judge mode, attack demo): DENY reasons render at 14 px in the brighter colour, ALLOW notes unchanged, no horizontal overflow, 5 ALLOW + 2 forced DENY. 61 tests pass.
