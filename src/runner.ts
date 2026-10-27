@@ -7,11 +7,14 @@
 // invoice, total), computed here in code. The agent's plan can only narrow them (e.g.
 // "pay this week's invoices" selects some invoices); a payment that matches no invoice
 // never widens them. A tricked agent can propose anything; it cannot change what is approved.
+// Before approval, src/vendors.ts removes duplicate invoices and, with a vendor file
+// (YEBO_VENDORS), invoices whose payee or bank account is not on file.
 
 import { chat, endpoint, type Brain, type Message, type Tool } from "./muse.js";
 import { checkPayment, requestMission, waitForApproval, DRY_RUN_OUTCOME, type Decision, type PaymentProposal } from "./yebo.js";
 import { extractInvoiceSource, type Invoice, type InvoiceSource } from "./invoice.js";
 import { findHiddenRequests, type HiddenRequest } from "./injection.js";
+import { checkInvoices, loadVendors, type Rejection } from "./vendors.js";
 import type { GatewayMode } from "./gatewayMode.js";
 
 const MISSION_TTL_MS = 15 * 60_000;
@@ -30,6 +33,7 @@ export type DecisionResult = {
   id: string; // proposal id, e.g. "p1"
   proposal: PaymentProposal;
   forced?: boolean; // attack demo: forced through, not proposed by the agent
+  held?: boolean; // stopped by the duplicate or vendor check before reaching Yebo
   decision: Decision;
   outcome: string;
   reason?: string;
@@ -38,7 +42,7 @@ export type DecisionResult = {
 
 export type RunEvent =
   // model: what plans the payments; readerModel: what reads the invoices
-  | { type: "started"; mode: GatewayMode["mode"]; agentMode: AgentMode; brain: Brain; model: string; brainLabel: string; readerModel: string; goal: string; invoices: number; today: string }
+  | { type: "started"; mode: GatewayMode["mode"]; agentMode: AgentMode; brain: Brain; model: string; brainLabel: string; readerModel: string; goal: string; invoices: number; today: string; vendorCheck: boolean }
   | { type: "invoice"; invoice: Invoice }
   | { type: "invoice_error"; file: string; error: string }
   | { type: "planning" }
@@ -46,6 +50,8 @@ export type RunEvent =
   | { type: "proposed"; id: string; proposal: PaymentProposal; matchesInvoice: boolean | null; forced?: boolean }
   | { type: "hidden_requests"; requests: HiddenRequest[] }
   | { type: "proposal_refused"; raw: string }
+  // chosen invoices left out of the limits: duplicates, or not matching the vendor file
+  | { type: "invoices_refused"; rejected: Rejection[] }
   | { type: "mission"; requestId: string; authorizeUrl: string; limits: MissionLimits; source: "invoices" | "proposals"; expiresAt: string; requiredApprovals: number }
   | { type: "no_mission"; reason: string }
   | { type: "mission_result"; approved: boolean }
@@ -196,11 +202,12 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
   const agentMode: AgentMode = input.agentMode ?? "guarded";
   try {
     const date = today();
+    const vendors = loadVendors();
     const brain: Brain = input.brain ?? "muse-spark";
     const ep = endpoint(brain);
     emit({
       type: "started", mode: gateway.mode, agentMode, brain, model: ep.model, brainLabel: ep.label,
-      readerModel: endpoint("muse-spark").model, goal: input.goal, invoices: input.sources.length, today: date,
+      readerModel: endpoint("muse-spark").model, goal: input.goal, invoices: input.sources.length, today: date, vendorCheck: !!vendors,
     });
     const invoices = await readInvoices(input.sources, emit);
     if (input.sources.length && !invoices.length) throw new Error("none of the invoices could be read");
@@ -215,6 +222,11 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
     let missionToken = process.env.YEBO_MISSION_TOKEN ?? ""; // reuse an approved mission if given
     let missionRequested = missionToken !== "";
     let next = 1;
+    // Yebo sees payee, amount and the budget left, not which invoice a payment is for. So
+    // each invoice that passed the checks pays for one proposal at most, and a proposal that
+    // matches only a refused invoice is held here instead of using up an approved one.
+    let unpaid: Invoice[] = [];
+    let refused: { invoice: Invoice; reason: string }[] = [];
     const messages: Message[] = [
       { role: "system", content: GUARDED },
       { role: "user", content: userContent },
@@ -264,9 +276,20 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
       // plan. Anything outside the approved limits is denied by Yebo.
       if (!missionRequested && (proposals.length || forced.length)) {
         missionRequested = true;
-        const limits = invoices.length ? limitsFromInvoices(selectedInvoices(invoices, proposals)) : limitsFor(proposals);
+        let chosen: Invoice[] = [];
+        if (invoices.length) {
+          const checked = checkInvoices(selectedInvoices(invoices, proposals), vendors);
+          if (checked.rejected.length) emit({ type: "invoices_refused", rejected: checked.rejected });
+          chosen = checked.passed;
+          unpaid = [...checked.passed];
+          refused = invoices.flatMap((i) => {
+            const r = checked.rejected.find((x) => x.file === i.file);
+            return r ? [{ invoice: i, reason: r.reason }] : [];
+          });
+        }
+        const limits = invoices.length ? limitsFromInvoices(chosen) : limitsFor(proposals);
         if (limits) missionToken = await approveMission(input.goal, limits, invoices.length ? "invoices" : "proposals", emit);
-        else emit({ type: "no_mission", reason: "the plan matches none of the invoices that can be paid in USD" });
+        else emit({ type: "no_mission", reason: "the plan matches none of the invoices that can be paid in USD and pass the checks" });
       }
 
       for (const c of calls) {
@@ -274,8 +297,13 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
           messages.push({ role: "tool", tool_call_id: c.call.id, content: JSON.stringify({ decision: "DENY", outcome: "denied", reason: "malformed proposal" }) });
           continue;
         }
-        const r = await checkPayment(missionToken, c.proposal);
-        const result: DecisionResult = { id: c.id, proposal: c.proposal, decision: r.decision, outcome: r.outcome, reason: r.reason, receipt: r.receipt };
+        const slot = unpaid.findIndex((i) => sameAs(c.proposal!, i));
+        if (slot >= 0) unpaid.splice(slot, 1);
+        const hold = slot < 0 ? refused.find((x) => sameAs(c.proposal!, x.invoice)) : undefined;
+        const r = hold
+          ? { decision: "DENY" as Decision, outcome: "held, not sent to Yebo", reason: hold.reason, receipt: undefined }
+          : await checkPayment(missionToken, c.proposal);
+        const result: DecisionResult = { id: c.id, proposal: c.proposal, ...(hold ? { held: true } : {}), decision: r.decision, outcome: r.outcome, reason: r.reason, receipt: r.receipt };
         results.push(result);
         emit({ type: "decision", ...result });
         // The model gets the decision in plain words, not the gateway's raw response
