@@ -207,3 +207,7 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 
 - `SUBMISSION.md` (draft only, not submitted): name, one-line pitch, a 150-word description (counted), track and problem statement, the Meta models and how they are used, built during the hackathon vs pre-existing, how to run, links, bonus prizes, deadline.
 - Checked cerebralvalley.ai/e/meta-ai-developer-hackathon: the two problem statements are "Build for Your World" and "Push the Frontier"; Startup track judged on technical execution and production readiness; deadline Nov 4, 9:00 PM ET. The page lists no bonus prizes and did not link the Official Rules, so bonus prizes are marked TO CONFIRM (a secondary source mentions community vote / most viral, up to $50,000).
+
+## 2026-10-27 (overnight: X post drafts)
+
+- `X_POSTS.md` (drafts only, not posted): three single demo posts and a 5-post thread, each under 280 characters as X counts them (links count as 23), each claim matching the repo (dry run, judge mode, the Yebo gateway pre-existing, Muse refused the hidden request and it was forced through), ending with the repo link.
