@@ -1,10 +1,10 @@
-// Finds payment requests hidden in invoice text (prompt injection): Muse Spark audits the
+// Finds payment requests hidden in invoice text (prompt injection): the model audits the
 // notes the invoice reader copied and lists every request to pay someone, without acting
 // on any of them. The web app and CLI show these as red flags. In the attack demo they are
 // forced through as payment proposals, as if the agent had been fully compromised, to show
 // that Yebo refuses them.
 
-import { structured, type JsonSchemaFormat } from "./muse.js";
+import { structured, type Brain, type JsonSchemaFormat } from "./muse.js";
 import type { Invoice } from "./invoice.js";
 
 export type HiddenRequest = { invoice_file: string; payee: string; amount_usd: number; quote: string };
@@ -62,9 +62,10 @@ export function parseRequests(json: string, invoices: Invoice[]): HiddenRequest[
   });
 }
 
-export async function findHiddenRequests(invoices: Invoice[]): Promise<HiddenRequest[]> {
+// brain: the run's brain; in Open mode Muse Spark Open does the audit (schema in the prompt).
+export async function findHiddenRequests(invoices: Invoice[], brain: Brain = "muse-spark"): Promise<HiddenRequest[]> {
   const withNotes = invoices.filter((i) => i.notes).map((i) => ({ file: i.file, notes: i.notes }));
   if (!withNotes.length) return [];
-  const json = await structured([{ role: "system", content: SYSTEM }, { role: "user", content: JSON.stringify(withNotes) }], FORMAT);
+  const json = await structured([{ role: "system", content: SYSTEM }, { role: "user", content: JSON.stringify(withNotes) }], FORMAT, brain);
   return parseRequests(json, invoices);
 }

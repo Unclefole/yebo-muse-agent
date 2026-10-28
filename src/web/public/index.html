@@ -25,6 +25,12 @@
 
   <main class="grid">
     <section class="col">
+      <article class="card replay-card" id="replay-card" hidden>
+        <h2><span class="step">R</span> Replays of real runs</h2>
+        <p class="muted" id="replay-intro">Each replay plays back a real run recorded in judge mode, event for event, as the app streamed it. No model is called and nothing costs anything. Long waits are shortened.</p>
+        <ul class="replay-list" id="replay-list"></ul>
+      </article>
+
       <article class="card lab-card" id="lab-card" hidden>
         <h2><span class="step">L</span> Controls Lab</h2>
         <p class="muted">Preset scenarios, each testing one accounts-payable control. One click loads the invoices and the vendor file settings, then runs the agent.</p>
@@ -43,6 +49,7 @@
 
       <article class="card" id="upload-card">
         <h2><span class="step">1</span> Invoices</h2>
+        <p class="muted hosted-note" id="hosted-note" hidden></p>
         <label class="drop" id="drop">
           <input type="file" id="file-input" multiple accept=".png,.jpg,.jpeg,.gif,.webp,.pdf">
           <strong>Drop invoices here</strong>
@@ -57,6 +64,7 @@
           <legend>Agent brain</legend>
           <label><input type="radio" name="brain" value="muse-spark" checked> <span><strong>Muse Spark</strong> <small id="brain-spark">Meta Model API</small></span></label>
           <label id="brain-open-label"><input type="radio" name="brain" value="muse-spark-open" id="brain-open"> <span><strong>Muse Spark Open</strong> <small id="brain-open-note">open weights, via Baseten</small></span></label>
+          <p class="brain-steps" id="brain-steps">Open: voice, invoice images, the hidden-request check and planning run on Muse Spark Open. PDF invoices are still read by Muse Spark 1.3, because Baseten does not accept PDFs.</p>
         </fieldset>
         <label class="toggle">
           <input type="checkbox" id="attack-demo">
@@ -64,7 +72,7 @@
         </label>
         <div class="field">
           <label for="goal">Instruction for the agent, typed or spoken</label>
-          <div class="goal-row">
+          <div class="goal-row" id="goal-row">
             <input type="text" id="goal" value="Pay these invoices." maxlength="500">
             <button type="button" class="mic" id="mic" aria-label="Speak the instruction" title="Speak the instruction">
               <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 15a3 3 0 0 0 3-3V6a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3Zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.93V21h2v-2.07A7 7 0 0 0 19 12h-2Z"/></svg>
@@ -78,7 +86,7 @@
       </article>
 
       <article class="card" id="read-card" hidden>
-        <h2><span class="step">2</span> What Muse Spark read</h2>
+        <h2><span class="step">2</span> <span id="read-title">What Muse Spark read</span></h2>
         <div class="table-wrap">
           <table>
             <thead><tr><th>Payee</th><th class="num">Amount</th><th>Due</th><th>Invoice</th></tr></thead>
@@ -89,7 +97,7 @@
 
       <article class="card alert-card" id="hidden-card" hidden>
         <h2><span class="step alert">!</span> Hidden payment requests found</h2>
-        <p class="muted">Muse Spark found these instructions written inside the invoices. They are not invoices, and the agent does not follow them.</p>
+        <p class="muted" id="hidden-intro">Muse Spark found these instructions written inside the invoices. They are not invoices, and the agent does not follow them.</p>
         <ul class="hidden-list" id="hidden-list"></ul>
       </article>
 

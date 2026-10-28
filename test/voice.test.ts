@@ -2,7 +2,7 @@
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { checkWav, cleanTranscript, transcribe, VOICE_MODEL } from "../src/voice.js";
+import { checkWav, cleanTranscript, transcribe, transcribeOpen, VOICE_MODEL } from "../src/voice.js";
 
 const SAMPLE = readFileSync("demo/voice/pay-this-weeks-invoices.wav");
 const realFetch = globalThis.fetch;
@@ -72,4 +72,28 @@ test("cleanTranscript: one capitalised sentence with a single full stop", () => 
   assert.equal(cleanTranscript("pay this week's invoices.."), "Pay this week's invoices.");
   assert.equal(cleanTranscript("  pay the overdue ones 。 "), "Pay the overdue ones.");
   assert.equal(cleanTranscript("..."), "");
+});
+
+test("transcribeOpen sends the WAV to Muse Spark Open as an audio_url part and cleans the answer", async () => {
+  process.env.BASETEN_API_KEY = "baseten-key";
+  process.env.BASETEN_API_BASE = "https://inference.baseten.test/v1";
+  const sent: { url: string; body: any }[] = [];
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    sent.push({ url, body: JSON.parse(String(init.body)) });
+    return new Response(JSON.stringify({ choices: [{ message: { role: "assistant", content: "\u201cpay these invoices\u201d" } }] }), { status: 200 });
+  }) as unknown as typeof fetch;
+  try {
+    assert.equal(await transcribeOpen(SAMPLE), "Pay these invoices.");
+    assert.equal(sent[0].url, "https://inference.baseten.test/v1/chat/completions");
+    assert.equal(sent[0].body.model, "meta-models/muse-spark-open");
+    const part = sent[0].body.messages[1].content.find((p: any) => p.type === "audio_url");
+    assert.equal(part.audio_url.url, `data:audio/wav;base64,${SAMPLE.toString("base64")}`);
+    // Same WAV checks before anything is sent, and Baseten's 5-minute limit.
+    await assert.rejects(transcribeOpen(wav({ channels: 2 })), /mono/);
+    await assert.rejects(transcribeOpen(wav({ samples: 16000 * 301 })), /longer than 5 minutes/);
+    assert.equal(sent.length, 1);
+  } finally {
+    delete process.env.BASETEN_API_KEY;
+    delete process.env.BASETEN_API_BASE;
+  }
 });

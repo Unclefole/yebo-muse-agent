@@ -13,7 +13,8 @@ export const DEFAULT_MODEL = "muse-spark-1.3"; // the docs' recommended Muse Spa
 export type ContentPart =
   | { type: "text"; text: string }
   | { type: "image_url"; image_url: { url: string } }
-  | { type: "file"; file: { filename: string; file_data: string } };
+  | { type: "file"; file: { filename: string; file_data: string } }
+  | { type: "audio_url"; audio_url: { url: string } }; // Baseten (Muse Spark Open) only
 
 export type Message = {
   role: "system" | "user" | "assistant" | "tool";
@@ -50,8 +51,11 @@ export function model(): string {
 //                    https://inference.baseten.co/v1, Authorization: Bearer, model
 //                    "meta-models/muse-spark-open", tool calling supported, structured
 //                    output NOT supported, recommended temperature 1.0 and top_p 1.0.
-// Invoice reading and the hidden-request audit use strict JSON schemas, so they always run
-// on Muse Spark through the Meta Model API.
+// In Open mode the other model steps run on Muse Spark Open too: reading invoice images
+// (not PDFs: "Muse Spark Open doesn't accept PDF files", docs.baseten.co vision page,
+// 2026-10-27), the hidden-request audit, and voice (audio_url parts, docs.baseten.co audio
+// page). Without structured output, the JSON schema goes into the prompt and the app's own
+// validators decide what is usable, exactly as they do for Muse Spark's answers.
 export type Brain = "muse-spark" | "muse-spark-open";
 
 export const OPEN_DEFAULT_MODEL = "meta-models/muse-spark-open";
@@ -80,6 +84,18 @@ export function endpoint(brain: Brain = "muse-spark"): Endpoint {
   };
 }
 
+// The model name without the provider prefix, for display: "muse-spark-open".
+export function shortName(model: string): string {
+  return model.split("/").pop() ?? model;
+}
+
+// Token usage of every completed call, for the hosted demo's daily spend cap.
+export type Usage = { brain: Brain; model: string; prompt_tokens: number; completion_tokens: number; cached_tokens: number };
+let usageMeter: ((u: Usage) => void) | null = null;
+export function onUsage(meter: ((u: Usage) => void) | null): void {
+  usageMeter = meter;
+}
+
 export function openAvailable(): boolean {
   return !!process.env.BASETEN_API_KEY;
 }
@@ -105,6 +121,11 @@ async function complete(body: Record<string, unknown>, brain: Brain = "muse-spar
   }
   if (!res.ok) throw new Error(`${who} ${res.status}: ${await res.text()}`);
   const data = await res.json();
+  const u = data?.usage;
+  if (usageMeter && u) {
+    const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+    usageMeter({ brain, model: ep.model, prompt_tokens: n(u.prompt_tokens), completion_tokens: n(u.completion_tokens), cached_tokens: n(u.prompt_tokens_details?.cached_tokens) });
+  }
   const message = data?.choices?.[0]?.message;
   if (!message) throw new Error(`${who} returned no message`);
   return message as Message;
@@ -115,9 +136,20 @@ export async function chat(messages: Message[], tools: Tool[], brain: Brain = "m
   return complete({ messages, ...(tools.length ? { tools, tool_choice: "auto" } : {}) }, brain);
 }
 
-// One structured answer, constrained to `format`. Returns the raw JSON text.
-export async function structured(messages: Message[], format: JsonSchemaFormat): Promise<string> {
-  const message = await complete({ messages, response_format: format });
-  if (typeof message.content !== "string") throw new Error("Meta API returned no structured content");
+// One structured answer, constrained to `format`. Returns the raw JSON text. Muse Spark
+// Open has no structured output, so it gets the schema in its system prompt instead and
+// the caller's validator does the constraining.
+export async function structured(messages: Message[], format: JsonSchemaFormat, brain: Brain = "muse-spark"): Promise<string> {
+  const message = brain === "muse-spark-open"
+    ? await complete({ messages: withSchema(messages, format) }, brain)
+    : await complete({ messages, response_format: format });
+  if (typeof message.content !== "string") throw new Error(`${brain === "muse-spark-open" ? "Baseten" : "Meta API"} returned no structured content`);
   return message.content;
+}
+
+export function withSchema(messages: Message[], format: JsonSchemaFormat): Message[] {
+  const rule = `Answer with one JSON object and nothing else (no code fence, no comments), matching this JSON schema:\n${JSON.stringify(format.json_schema.schema)}`;
+  const i = messages.findIndex((m) => m.role === "system" && typeof m.content === "string");
+  if (i < 0) return [{ role: "system", content: rule }, ...messages];
+  return messages.map((m, j) => (j === i ? { ...m, content: `${m.content}\n\n${rule}` } : m));
 }

@@ -3,7 +3,8 @@
 // The Meta API is mocked here; nothing leaves the machine.
 import { test, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { extractInvoice, invoicePart, parseInvoice, cleanPayee, normalizeDate, INVOICE_FORMAT } from "../src/invoice.js";
+import { extractInvoice, invoicePart, parseInvoice, cleanPayee, normalizeDate, readerFor, OPEN_MAX_IMAGE_BYTES, INVOICE_FORMAT } from "../src/invoice.js";
+import { modelSteps, readerGroups, readingLine } from "../src/runner.js";
 
 const PNG = "demo/invoices/brightleaf-studio-INV-1042.png";
 const PDF = "demo/invoices/nimbus-hosting-NH-88317.pdf";
@@ -119,4 +120,28 @@ test("a fenced or wrapped JSON answer still parses; a bad first answer is retrie
   answers[1] = "still not json";
   await assert.rejects(extractInvoice(PNG), /did not return JSON/);
   assert.equal(calls, 2, "no more than one retry");
+});
+
+test("Open mode: images are read by Muse Spark Open; PDFs and images over 10 MB by Muse Spark", () => {
+  const png = { name: "a.png", data: Buffer.alloc(10) };
+  const pdf = { name: "b.PDF", data: Buffer.alloc(10) };
+  const big = { name: "c.jpg", data: Buffer.alloc(OPEN_MAX_IMAGE_BYTES + 1) };
+  assert.deepEqual(readerFor(png, "muse-spark"), { brain: "muse-spark" });
+  assert.deepEqual(readerFor(pdf, "muse-spark"), { brain: "muse-spark" });
+  assert.deepEqual(readerFor(png, "muse-spark-open"), { brain: "muse-spark-open" });
+  assert.equal(readerFor(pdf, "muse-spark-open").brain, "muse-spark");
+  assert.match(readerFor(pdf, "muse-spark-open").why!, /^PDF: .*does not accept PDFs/);
+  assert.match(readerFor(big, "muse-spark-open").why!, /10 MB/);
+
+  const open = readerGroups([png, pdf, png, png], "muse-spark-open");
+  assert.equal(readingLine(4, open), "Reading 4 invoices: 3 with muse-spark-open, 1 with muse-spark-1.3 (PDF: Muse Spark Open on Baseten does not accept PDFs)");
+  assert.equal(readingLine(2, readerGroups([png, png], "muse-spark-open")), "Reading 2 invoices with muse-spark-open");
+  assert.equal(readingLine(1, readerGroups([pdf], "muse-spark")), "Reading 1 invoice with muse-spark-1.3");
+  assert.deepEqual(modelSteps("muse-spark-open", open), [
+    { step: "reading 3 of 4 invoices", model: "muse-spark-open", open: true },
+    { step: "reading 1 of 4 invoices (PDF)", model: "muse-spark-1.3", open: false },
+    { step: "hidden-request check", model: "muse-spark-open", open: true },
+    { step: "planning and tool calls", model: "muse-spark-open", open: true },
+  ]);
+  assert.ok(modelSteps("muse-spark", readerGroups([png], "muse-spark")).every((st) => !st.open && st.model === "muse-spark-1.3"));
 });

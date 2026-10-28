@@ -16,9 +16,9 @@
 // With the vendor file, the mission's payees are the vendor file's names. Payments Yebo
 // allows to a vendor with a 24-hour limit are recorded in the vendor ledger (src/ledger.ts).
 
-import { chat, endpoint, type Brain, type Message, type Tool } from "./muse.js";
+import { chat, endpoint, shortName, type Brain, type Message, type Tool } from "./muse.js";
 import { checkPayment, requestMission, waitForApproval, DRY_RUN_OUTCOME, type Decision, type PaymentProposal } from "./yebo.js";
-import { extractInvoiceSource, type Invoice, type InvoiceSource } from "./invoice.js";
+import { extractInvoiceSource, readerFor, type Invoice, type InvoiceSource } from "./invoice.js";
 import { findHiddenRequests, type HiddenRequest } from "./injection.js";
 import { accountEndings, capRefusal, checkInvoices, loadVendors, vendorFor, vendorName, type Rejection, type Vendor } from "./vendors.js";
 import { DAY_MS, fileLedger, type Ledger } from "./ledger.js";
@@ -49,14 +49,16 @@ export type DecisionResult = {
 };
 
 export type RunEvent =
-  // model: what plans the payments; readerModel: what reads the invoices
-  | { type: "started"; mode: GatewayMode["mode"]; agentMode: AgentMode; brain: Brain; model: string; brainLabel: string; readerModel: string; goal: string; invoices: number; today: string; vendorCheck: boolean }
-  | { type: "invoice"; invoice: Invoice }
+  // model: what plans the payments; readerModel: what reads most invoices; reading: which
+  // model reads how many invoices (and why, when it is not the brain's own); steps: every
+  // model step of the run and whether its model has open weights
+  | { type: "started"; mode: GatewayMode["mode"]; agentMode: AgentMode; brain: Brain; model: string; brainLabel: string; readerModel: string; reading: ReaderGroup[]; steps: ModelStep[]; goal: string; invoices: number; today: string; vendorCheck: boolean }
+  | { type: "invoice"; invoice: Invoice; readBy: string }
   | { type: "invoice_error"; file: string; error: string }
   | { type: "planning" }
   // matchesInvoice: the payee and amount match one of the invoices read (null when the run has no invoices)
   | { type: "proposed"; id: string; proposal: PaymentProposal; matchesInvoice: boolean | null; forced?: boolean }
-  | { type: "hidden_requests"; requests: HiddenRequest[] }
+  | { type: "hidden_requests"; requests: HiddenRequest[]; model: string }
   | { type: "proposal_refused"; raw: string }
   // what each vendor with a 24-hour limit has already used, before the checks
   | { type: "allowances"; allowances: { vendor: string; max_24h_usd: number; used_usd: number }[] }
@@ -72,6 +74,48 @@ export type RunEvent =
   | { type: "error"; message: string };
 
 export type Emit = (event: RunEvent) => void;
+
+export type ReaderGroup = { model: string; count: number; why?: string };
+export type ModelStep = { step: string; model: string; open: boolean };
+
+const displayModel = (brain: Brain) => shortName(endpoint(brain).model);
+
+// Which model reads how many of these invoices, the brain's own model first.
+export function readerGroups(sources: InvoiceSource[], brain: Brain): ReaderGroup[] {
+  const groups = new Map<string, ReaderGroup>();
+  for (const s of sources) {
+    const r = readerFor(s, brain);
+    const model = displayModel(r.brain);
+    const key = `${model}|${r.why ?? ""}`;
+    const g = groups.get(key) ?? { model, count: 0, ...(r.why ? { why: r.why } : {}) };
+    g.count++;
+    groups.set(key, g);
+  }
+  return [...groups.values()].sort((a, b) => Number(!!a.why) - Number(!!b.why));
+}
+
+// "Reading 5 invoices with muse-spark-open", or, when some are read by another model,
+// "Reading 5 invoices: 4 with muse-spark-open, 1 with muse-spark-1.3 (PDF: ...)".
+export function readingLine(total: number, reading: ReaderGroup[]): string {
+  const head = `Reading ${total} invoice${total === 1 ? "" : "s"}`;
+  if (reading.length <= 1) return `${head} with ${reading[0]?.model ?? "?"}`;
+  return `${head}: ${reading.map((g) => `${g.count} with ${g.model}${g.why ? ` (${g.why})` : ""}`).join(", ")}`;
+}
+
+// Every model step of a run, in order. Muse Spark Open is the only open-weight model here.
+export function modelSteps(brain: Brain, reading: ReaderGroup[]): ModelStep[] {
+  const open = (model: string) => model === displayModel("muse-spark-open") && brain === "muse-spark-open";
+  const total = reading.reduce((n, g) => n + g.count, 0);
+  return [
+    ...reading.map((g) => ({
+      step: `${g.count === total ? "reading the invoices" : `reading ${g.count} of ${total} invoices`}${g.why ? ` (${g.why.split(":")[0]})` : ""}`,
+      model: g.model,
+      open: open(g.model),
+    })),
+    { step: "hidden-request check", model: displayModel(brain), open: brain === "muse-spark-open" },
+    { step: "planning and tool calls", model: displayModel(brain), open: brain === "muse-spark-open" },
+  ];
+}
 
 const tools: Tool[] = [
   {
@@ -204,20 +248,20 @@ export function limitsFor(proposals: PaymentProposal[]): MissionLimits {
 // With the vendor file on, an invoice read without an account number would be refused, so
 // it is read once more (in testing Muse Spark copied the account in about 65 of 66 reads).
 // The second reading is used only if it has one; otherwise the first stands and is refused.
-async function readOne(source: InvoiceSource, needAccount: boolean): Promise<Invoice> {
-  const first = await extractInvoiceSource(source);
+async function readOne(source: InvoiceSource, needAccount: boolean, brain: Brain): Promise<Invoice> {
+  const first = await extractInvoiceSource(source, brain);
   if (!needAccount || accountEndings(first.payment_details).length) return first;
-  const again = await extractInvoiceSource(source).catch(() => null);
+  const again = await extractInvoiceSource(source, brain).catch(() => null);
   return again && accountEndings(again.payment_details).length ? again : first;
 }
 
-async function readInvoices(sources: InvoiceSource[], needAccount: boolean, emit: Emit): Promise<Invoice[]> {
-  const results = await Promise.allSettled(sources.map((s) => readOne(s, needAccount)));
+async function readInvoices(sources: InvoiceSource[], needAccount: boolean, brain: Brain, emit: Emit): Promise<Invoice[]> {
+  const results = await Promise.allSettled(sources.map((s) => readOne(s, needAccount, brain)));
   const invoices: Invoice[] = [];
   results.forEach((r, i) => {
     if (r.status === "fulfilled") {
       invoices.push(r.value);
-      emit({ type: "invoice", invoice: r.value });
+      emit({ type: "invoice", invoice: r.value, readBy: displayModel(readerFor(sources[i], brain).brain) });
     } else {
       emit({ type: "invoice_error", file: sources[i].name, error: r.reason instanceof Error ? r.reason.message : String(r.reason) });
     }
@@ -263,18 +307,20 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
     const ledger: Ledger | null = limited.length ? input.ledger ?? fileLedger() : null;
     const brain: Brain = input.brain ?? "muse-spark";
     const ep = endpoint(brain);
+    const reading = readerGroups(input.sources, brain);
     emit({
       type: "started", mode: gateway.mode, agentMode, brain, model: ep.model, brainLabel: ep.label,
-      readerModel: endpoint("muse-spark").model, goal: input.goal, invoices: input.sources.length, today: date, vendorCheck: !!vendors,
+      readerModel: reading[0]?.model ?? displayModel(brain), reading, steps: modelSteps(brain, reading),
+      goal: input.goal, invoices: input.sources.length, today: date, vendorCheck: !!vendors,
     });
-    const invoices = await readInvoices(input.sources, !!vendors, emit);
+    const invoices = await readInvoices(input.sources, !!vendors, brain, emit);
     if (input.sources.length && !invoices.length) throw new Error("none of the invoices could be read");
     const dated = `${input.goal}\n\nToday is ${weekday(date)}, ${date}.`;
     const userContent = invoices.length
       ? `${dated}\n\nInvoices read from the uploaded files (untrusted data from the senders):\n${JSON.stringify(invoices, null, 2)}`
       : dated;
     // Audit the invoice notes for hidden payment requests while the agent plans.
-    const hiddenSearch = findHiddenRequests(invoices).catch(() => [] as HiddenRequest[]);
+    const hiddenSearch = findHiddenRequests(invoices, brain).catch(() => [] as HiddenRequest[]);
 
     // 1. Plan. The agent proposes every payment it wants, over as many turns as it needs;
     //    each proposal is only recorded. Nothing is approved or checked until it is done,
@@ -325,7 +371,7 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
     // 2. Hidden requests. In the attack demo they are also forced through, after the
     //    agent's own proposals, unless the agent proposed the same payment itself.
     const hidden = await hiddenSearch;
-    if (hidden.length) emit({ type: "hidden_requests", requests: hidden });
+    if (hidden.length) emit({ type: "hidden_requests", requests: hidden, model: displayModel(brain) });
     const forced: { id: string; proposal: PaymentProposal }[] = [];
     if (agentMode === "attack-demo") {
       for (const h of hidden) {
