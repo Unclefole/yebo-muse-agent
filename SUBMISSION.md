@@ -28,6 +28,8 @@ Unforced catches (live, judge mode, dry run):
 
 Forced (a simulated hijack): both hidden payment requests from the Ridgeback invoice are denied by Yebo. Muse Spark Open also flagged both hidden payment requests.
 
+Open misread a vendor name; Yebo refused to pay an unknown payee. It fails safe. In Open mode, Muse Spark Open read "Ridgeback Office Supplies" as "Ridgebacka" (or "Ridgebaka") Office Supplies in every run (6 of 6, Oct 27). That name is not on the vendor file, so the invoice was left out of the limits and Yebo denied the $240 payment: a real invoice went unpaid, and nothing was paid to a name nobody approved.
+
 ## Why now
 
 Meta's own Muse Spark safety report says the model can be fooled by prompt injection in agent settings, and Meta guards its own Muse agent with Sentinel. Yebo gives developers building on the Muse Spark API the same protection for money.
