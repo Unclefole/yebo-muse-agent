@@ -70,7 +70,7 @@
   <text class="panel-title" x="40" y="388">Which model runs each step</text>
   <text class="th" x="40" y="418">Step</text>
   <text class="th" x="372" y="418">Default</text>
-  <text class="th" x="640" y="418">Open mode (Muse Spark Open: open weights, via Baseten)</text>
+  <text class="th" x="640" y="418">Open mode (Muse Spark Open via Baseten)</text>
   <line class="rule" x1="36" y1="428" x2="964" y2="428"/>
   <rect x="630" y="436" width="334" height="26" rx="6" fill="#f1ebff" stroke="#8a63d2"/>
   <text class="cell" x="40" y="454">Voice instruction</text>
