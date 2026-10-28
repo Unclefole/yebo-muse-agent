@@ -75,7 +75,7 @@ Prefer the terminal? `npm run dev -- demo/invoices` does the same run in the CLI
 
 ## How it works
 
-![Architecture: untrusted invoices and voice go to Meta models (Muse Spark 1.3 reads invoices and flags hidden requests, Muse Voice Transcribe, and the agent brain on Muse Spark 1.3 or Muse Spark Open proposes payments); trusted code builds the limits from the invoices, a human approves them once, and Yebo checks every payment.](docs/architecture.svg)
+![Architecture: untrusted invoices and voice go to Meta models, which read and audit the invoices, transcribe the voice and plan the payments; trusted code builds the limits from the invoices, a human approves them once, and Yebo checks every payment. A table shows which model runs each step: by default Muse Voice Transcribe and Muse Spark 1.3; in Open mode Muse Spark Open for voice, invoice images, the audit and planning, with PDFs still on Muse Spark 1.3.](docs/architecture.svg)
 
 1. **Read.** Muse Spark 1.3 (or, in Open mode, Muse Spark Open for images) reads each invoice image or PDF into JSON (payee, amount, currency, due date, invoice number, payment details, notes) under a strict JSON schema. The answer is validated: payees that look like bank details are refused, written dates are converted, and anything unusable is retried once and then rejected.
 2. **Audit.** A second model call (Muse Spark, or Muse Spark Open in Open mode) lists any payment requests written inside the invoices (prompt injections), with the exact quote. They are shown as red flags and never followed.
