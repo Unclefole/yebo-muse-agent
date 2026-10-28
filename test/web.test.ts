@@ -6,9 +6,11 @@ import assert from "node:assert/strict";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { JudgeGateway } from "../src/judge/gateway.js";
-import { WebApp } from "../src/web/server.js";
+import { WebApp, type WebOptions } from "../src/web/server.js";
+import { LiveGuard } from "../src/web/hosted.js";
+import { toReplay } from "../src/web/replays.js";
 import type { RunEvent } from "../src/runner.js";
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -38,13 +40,18 @@ let gw: JudgeGateway;
 let server: Server;
 let base = "";
 let fooledAgent = false;
-const metaCalls: string[] = []; // when true, the fake model itself proposes the injected $9,000
+const metaCalls: string[] = [];
+const metaBodies: { url: string; body: any }[] = []; // fooledAgent: the fake model itself proposes the injected $9,000
 
 // Stands in for Muse Spark: reads each invoice by file name, audits notes for hidden
 // requests, proposes one payment per invoice (plus Harlow if fooled), then a closing message.
 function fakeMeta(body: any): unknown {
   const reply = (message: unknown) => ({ choices: [{ message: { role: "assistant", ...(message as object) } }] });
-  const schema = body.response_format?.json_schema?.name;
+  if (JSON.stringify(body.messages).includes('"audio_url"')) return reply({ content: "pay these invoices" }); // Muse Spark Open transcribing
+  // Muse Spark gets response_format; Muse Spark Open gets the schema in its system prompt.
+  const sys = typeof body.messages?.[0]?.content === "string" ? body.messages[0].content : "";
+  const schema = body.response_format?.json_schema?.name
+    ?? (sys.includes('"invoice_number"') ? "invoice" : sys.includes('"requests"') ? "payment_requests" : undefined);
   if (schema === "invoice") {
     const name = Object.keys(SAMPLES).find((n) => JSON.stringify(body.messages).includes(n))!;
     const s = SAMPLES[name];
@@ -76,7 +83,10 @@ before(async () => {
     if (String(url) === `${META}/asr/transcribe`) {
       return new Response(JSON.stringify({ sessionId: "s", transcript: "pay this week's invoices..", audioDurationMs: 1600, turns: [] }), { status: 200 });
     }
-    if (String(url).startsWith(META)) metaCalls.push(String(url));
+    if (String(url).startsWith(META)) {
+      metaCalls.push(String(url));
+      metaBodies.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+    }
     if (String(url).startsWith(META)) return new Response(JSON.stringify(fakeMeta(JSON.parse(String(init?.body)))), { status: 200 });
     return realFetch(url, init);
   }) as typeof fetch;
@@ -211,7 +221,7 @@ test("'this week' narrows the mission to the invoices the agent chose, using tod
   assert.ok(decisions(ev).every((d) => d.decision === "ALLOW"));
 });
 
-test("Muse Spark Open: refused without a Baseten key; with one, planning goes to Baseten and reading stays on Meta", async () => {
+test("Muse Spark Open: refused without a Baseten key; with one, every step runs on Baseten except reading the PDF", async () => {
   delete process.env.BASETEN_API_KEY;
   const refused = await fetch(`${base}/api/runs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ samples: true, brain: "muse-spark-open" }) });
   assert.equal(refused.status, 400);
@@ -219,17 +229,33 @@ test("Muse Spark Open: refused without a Baseten key; with one, planning goes to
 
   process.env.BASETEN_API_KEY = "baseten-key";
   process.env.BASETEN_API_BASE = `${META}/baseten`; // routed to the same fake model
+  metaBodies.length = 0;
   try {
     const ev = await run({ samples: true, brain: "muse-spark-open" });
     const started = ev[0];
     assert.ok(started.type === "started");
     assert.equal(started.brain, "muse-spark-open");
     assert.equal(started.model, "meta-models/muse-spark-open");
-    assert.equal(started.readerModel, "muse-spark-1.3");
+    assert.equal(started.readerModel, "muse-spark-open");
+    assert.deepEqual(started.reading, [
+      { model: "muse-spark-open", count: 4 },
+      { model: "muse-spark-1.3", count: 1, why: "PDF: Muse Spark Open on Baseten does not accept PDFs" },
+    ]);
+    assert.deepEqual(started.steps.map((st) => [st.model, st.open]), [["muse-spark-open", true], ["muse-spark-1.3", false], ["muse-spark-open", true], ["muse-spark-open", true]]);
+    const readBy = Object.fromEntries(ev.flatMap((e) => (e.type === "invoice" ? [[e.invoice.file, e.readBy]] : [])));
+    assert.equal(readBy["nimbus-hosting-NH-88317.pdf"], "muse-spark-1.3");
+    assert.equal(readBy["ridgeback-office-RO-7731.png"], "muse-spark-open");
+    const hidden = ev.find((e) => e.type === "hidden_requests");
+    assert.ok(hidden && hidden.type === "hidden_requests" && hidden.model === "muse-spark-open" && hidden.requests.length === 2);
     assert.equal(decisions(ev).length, 5);
     assert.ok(decisions(ev).every((d) => d.decision === "ALLOW"));
-    assert.ok(metaCalls.some((u) => u.startsWith(`${META}/baseten/chat/completions`)), "planning went to Baseten");
-    assert.ok(metaCalls.some((u) => u === `${META}/chat/completions`), "invoice reading stayed on the Meta API");
+    // The Meta API read only the PDF; Baseten never got response_format (it has no structured output).
+    const meta = metaBodies.filter((c) => c.url === `${META}/chat/completions`);
+    assert.equal(meta.length, 1);
+    assert.match(JSON.stringify(meta[0].body.messages), /nimbus-hosting-NH-88317\.pdf/);
+    const baseten = metaBodies.filter((c) => c.url.startsWith(`${META}/baseten/`));
+    assert.ok(baseten.length >= 6, "4 images, the audit and planning went to Baseten");
+    assert.ok(baseten.every((c) => !("response_format" in c.body)));
   } finally {
     delete process.env.BASETEN_API_KEY;
     delete process.env.BASETEN_API_BASE;
@@ -338,5 +364,109 @@ test("Controls Lab: split invoices give 2 ALLOW and 8 DENY every time, without t
     assert.equal(existsSync(process.env.YEBO_LEDGER), false);
   } finally {
     delete process.env.YEBO_LEDGER;
+  }
+});
+
+// Another web app on its own port, for the hosted demo and recording.
+async function serve(options: WebOptions): Promise<{ url: string; close: () => Promise<void> }> {
+  const app = new WebApp({ mode: "judge", url: process.env.YEBO_GATEWAY_URL!, stop: async () => {} }, options);
+  const s = createServer(app.handler);
+  await new Promise<void>((r) => s.listen(0, "127.0.0.1", () => r()));
+  return { url: `http://127.0.0.1:${(s.address() as AddressInfo).port}`, close: () => new Promise<void>((r) => s.close(() => r())) };
+}
+
+const post = (url: string, body: unknown, headers: Record<string, string> = {}) =>
+  fetch(url, { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+
+async function stream(url: string, id: string): Promise<RunEvent[]> {
+  const text = await (await fetch(`${url}/api/runs/${id}/events`)).text();
+  return text.split("\n\n").filter((f) => f.startsWith("data: ")).map((f) => JSON.parse(f.slice(6)));
+}
+
+test("voice in Open mode: the recording is transcribed by Muse Spark Open on Baseten", async () => {
+  process.env.BASETEN_API_KEY = "baseten-key";
+  process.env.BASETEN_API_BASE = `${META}/baseten`;
+  metaBodies.length = 0;
+  try {
+    const wav = readFileSync("demo/voice/pay-this-weeks-invoices.wav").toString("base64");
+    const res = await post(`${base}/api/transcribe`, { audio: wav, brain: "muse-spark-open" });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { transcript: "Pay these invoices.", model: "muse-spark-open" });
+    assert.ok(metaBodies.length === 1 && metaBodies[0].url === `${META}/baseten/chat/completions`);
+  } finally {
+    delete process.env.BASETEN_API_KEY;
+    delete process.env.BASETEN_API_BASE;
+  }
+});
+
+test("a recorded run becomes a replay that the replay site plays back without calling any model", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "yebo-rec-"));
+  const local = await serve({ recordDir: dir });
+  let replay;
+  try {
+    const res = await post(`${local.url}/api/runs`, { samples: "demo-set", goal: "Pay these invoices.", heard: { model: "muse-voice-transcribe-1.0", transcript: "Pay these invoices." } });
+    const live = await stream(local.url, (await res.json()).id);
+    for (let i = 0; i < 50 && !readdirSync(dir).length; i++) await new Promise((r) => setTimeout(r, 20));
+    const [file] = readdirSync(dir);
+    const rec = JSON.parse(readFileSync(join(dir, file), "utf8"));
+    assert.deepEqual(rec.input.heard, { model: "muse-voice-transcribe-1.0", transcript: "Pay these invoices." });
+    assert.equal(rec.input.invoices.length, 7);
+    assert.deepEqual(rec.events.map((e: any) => e.event), live);
+    replay = toReplay(rec, "demo-set", "Demo set", "Seven invoices");
+  } finally {
+    await local.close();
+  }
+
+  const site = await serve({ site: "replay", replays: [replay] });
+  try {
+    const cfg = await (await fetch(`${site.url}/api/config`)).json();
+    assert.equal(cfg.site, "replay");
+    assert.equal(cfg.liveRuns, false);
+    assert.equal(cfg.gateway, "", "the hosted demo does not show internal URLs");
+    const listed = (await (await fetch(`${site.url}/api/replays`)).json()).replays;
+    assert.deepEqual(listed.map((r: any) => [r.id, r.invoices, r.allowed, r.denied]), [["demo-set", 7, 5, 2]]);
+    assert.equal((await post(`${site.url}/api/runs`, { samples: true })).status, 403);
+    assert.equal((await post(`${site.url}/api/transcribe`, { audio: "AAAA" })).status, 403);
+    assert.equal((await post(`${site.url}/api/replays/nope/play`, {})).status, 404);
+    const calls = metaCalls.length;
+    const played = await post(`${site.url}/api/replays/demo-set/play`, {}, { origin: site.url.replace("http:", "https:") });
+    assert.equal(played.status, 201);
+    const ev = await stream(site.url, (await played.json()).id);
+    assert.deepEqual(ev, replay.events.map((e) => e.event));
+    const mission = ev.find((e) => e.type === "mission");
+    assert.ok(mission?.type === "mission" && mission.authorizeUrl === "");
+    assert.equal(metaCalls.length, calls, "no model was called");
+  } finally {
+    await site.close();
+  }
+});
+
+test("hosted live demo: bundled invoices only, no voice, and a per-visitor limit", async () => {
+  const guard = new LiveGuard({ enabled: true, perVisitorPerHour: 2, dailyUsd: 5, reserveUsd: 0.5, maxConcurrent: 2, trustProxy: false }, null);
+  const site = await serve({ site: "live", guard });
+  try {
+    const cfg = await (await fetch(`${site.url}/api/config`)).json();
+    assert.deepEqual([cfg.site, cfg.liveRuns, cfg.uploads, cfg.voice], ["live", true, false, false]);
+    assert.equal(cfg.live.perVisitorPerHour, 2);
+    assert.equal((await post(`${site.url}/api/runs`, { files: [{ name: "a.png", data: "AAAA" }] })).status, 400);
+    assert.equal((await post(`${site.url}/api/transcribe`, { audio: "AAAA" })).status, 403);
+    assert.equal((await post(`${site.url}/api/runs`, { samples: true }, { origin: "https://evil.example" })).status, 403);
+    for (let i = 0; i < 2; i++) {
+      const res = await post(`${site.url}/api/runs`, { scenario: "normal-week" }, { origin: site.url.replace("http:", "https:") });
+      assert.equal(res.status, 201);
+      assert.equal(decisions(await stream(site.url, (await res.json()).id)).filter((d) => d.decision === "ALLOW").length, 5);
+    }
+    const third = await post(`${site.url}/api/runs`, { samples: true });
+    assert.equal(third.status, 429);
+    assert.match((await third.json()).error, /2 live runs per visitor per hour/);
+  } finally {
+    await site.close();
+  }
+  const off = await serve({ site: "live", guard: new LiveGuard({ enabled: false, perVisitorPerHour: 2, dailyUsd: 5, reserveUsd: 0.5, maxConcurrent: 2, trustProxy: false }, null) });
+  try {
+    assert.equal((await (await fetch(`${off.url}/api/config`)).json()).liveRuns, false);
+    assert.equal((await post(`${off.url}/api/runs`, { samples: true })).status, 403);
+  } finally {
+    await off.close();
   }
 });

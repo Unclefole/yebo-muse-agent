@@ -7,7 +7,7 @@
 
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
-import { structured, type ContentPart, type JsonSchemaFormat } from "./muse.js";
+import { structured, type Brain, type ContentPart, type JsonSchemaFormat } from "./muse.js";
 
 export type Invoice = {
   file: string; // where it came from (file name only)
@@ -31,6 +31,18 @@ const IMAGE_TYPES: Record<string, string> = {
 };
 
 export const SUPPORTED_EXTENSIONS = [...Object.keys(IMAGE_TYPES), ".pdf"];
+
+// Muse Spark Open on Baseten reads images up to 10 MB each and no PDFs (docs.baseten.co,
+// vision page, 2026-10-27). In Open mode those invoices are read by Muse Spark instead.
+export const OPEN_MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+// Which model reads this invoice, and why it is not the brain's own model when it is not.
+export function readerFor(source: InvoiceSource, brain: Brain): { brain: Brain; why?: string } {
+  if (brain !== "muse-spark-open") return { brain: "muse-spark" };
+  if (extname(source.name).toLowerCase() === ".pdf") return { brain: "muse-spark", why: "PDF: Muse Spark Open on Baseten does not accept PDFs" };
+  if (source.data.length > OPEN_MAX_IMAGE_BYTES) return { brain: "muse-spark", why: "image over Muse Spark Open's 10 MB limit" };
+  return { brain: "muse-spark-open" };
+}
 
 // One invoice to read: a file name (for its type and for display) and its bytes.
 export type InvoiceSource = { name: string; data: Buffer };
@@ -174,9 +186,11 @@ export function parseInvoice(file: string, json: string): Invoice {
 
 const ATTEMPTS = 2; // one retry if the answer is unusable (malformed JSON, no clean payee)
 
-export async function extractInvoiceSource(source: InvoiceSource): Promise<Invoice> {
+// brain: the run's brain. In Open mode, images are read by Muse Spark Open (see readerFor).
+export async function extractInvoiceSource(source: InvoiceSource, brain: Brain = "muse-spark"): Promise<Invoice> {
   const file = basename(source.name);
   const part = sourcePart(source);
+  const reader = readerFor(source, brain).brain;
   let lastError: unknown;
   for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
     const json = await structured(
@@ -185,6 +199,7 @@ export async function extractInvoiceSource(source: InvoiceSource): Promise<Invoi
         { role: "user", content: [{ type: "text", text: `Extract the fields of this invoice (${file}).` }, part] },
       ],
       INVOICE_FORMAT,
+      reader,
     );
     try {
       return parseInvoice(file, json);

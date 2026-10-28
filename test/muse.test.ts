@@ -2,7 +2,7 @@
 // mocked; nothing leaves the machine.
 import { test, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { chat, structured, endpoint, OPEN_DEFAULT_MODEL } from "../src/muse.js";
+import { chat, structured, endpoint, onUsage, withSchema, OPEN_DEFAULT_MODEL, type Usage } from "../src/muse.js";
 
 const realFetch = globalThis.fetch;
 type Call = { url: string; auth: string; body: any };
@@ -57,9 +57,41 @@ test("the default brain stays on the Meta Model API with muse-spark-1.3", async 
   assert.equal(calls[0].body.reasoning_effort, undefined);
 });
 
-test("structured output (invoice reading) always uses the Meta Model API", async () => {
+test("structured answers use the Meta Model API by default, with response_format", async () => {
   await structured([{ role: "user", content: "x" }], { type: "json_schema", json_schema: { name: "n", strict: true, schema: {} } });
   assert.equal(calls[0].url, "https://api.meta.test/v1/chat/completions");
+  assert.equal(calls[0].body.response_format.json_schema.name, "n");
+});
+
+test("structured answers on Muse Spark Open put the schema in the system prompt (Baseten has no structured output)", async () => {
+  const format = { type: "json_schema" as const, json_schema: { name: "n", strict: true, schema: { type: "object", properties: { payee: { type: "string" } } } } };
+  await structured([{ role: "system", content: "You read invoices." }, { role: "user", content: "x" }], format, "muse-spark-open");
+  assert.equal(calls[0].url, "https://inference.baseten.test/v1/chat/completions");
+  assert.equal("response_format" in calls[0].body, false);
+  assert.match(calls[0].body.messages[0].content, /^You read invoices\.\n\nAnswer with one JSON object and nothing else/);
+  assert.match(calls[0].body.messages[0].content, /"payee":\{"type":"string"\}/);
+  assert.equal(calls[0].body.messages.length, 2);
+  // Without a system message, one is added in front.
+  assert.deepEqual(withSchema([{ role: "user", content: "x" }], format).map((m) => m.role), ["system", "user"]);
+});
+
+test("every completed call reports its token usage to the meter", async () => {
+  const seen: Usage[] = [];
+  onUsage((u) => seen.push(u));
+  try {
+    respond = () => new Response(JSON.stringify({
+      choices: [{ message: { role: "assistant", content: "ok" } }],
+      usage: { prompt_tokens: 1000, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 200 } },
+    }), { status: 200 });
+    await chat([{ role: "user", content: "hi" }], [], "muse-spark-open");
+    await chat([{ role: "user", content: "hi" }], []);
+  } finally {
+    onUsage(null);
+  }
+  assert.deepEqual(seen, [
+    { brain: "muse-spark-open", model: "meta-models/muse-spark-open", prompt_tokens: 1000, completion_tokens: 50, cached_tokens: 200 },
+    { brain: "muse-spark", model: "muse-spark-1.3", prompt_tokens: 1000, completion_tokens: 50, cached_tokens: 200 },
+  ]);
 });
 
 test("model name and reasoning effort can be changed from .env", async () => {

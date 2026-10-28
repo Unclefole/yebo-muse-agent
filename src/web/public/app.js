@@ -18,14 +18,19 @@ const clock = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute:
 const state = {
   files: [], samples: false, sampleNames: [], demoSetNames: [], mode: "judge", source: null, results: [],
   scenarios: [], scenario: null, runScenario: null, rejected: [],
+  cfg: {}, replays: [], replay: null, heard: null, brain: "muse-spark",
 };
+
+const brainChoice = () => document.querySelector('input[name="brain"]:checked')?.value || "muse-spark";
+const short = (model) => String(model).split("/").pop();
 
 async function init() {
   try {
     const cfg = await (await fetch("/api/config")).json();
+    state.cfg = cfg;
     state.mode = cfg.mode;
     const mode = $("mode-badge");
-    mode.textContent = cfg.mode === "judge" ? "Judge mode · local gateway" : "Live · Yebo gateway";
+    mode.textContent = cfg.site === "replay" ? "Replays · no API calls" : cfg.site === "live" ? "Hosted demo · judge mode" : cfg.mode === "judge" ? "Judge mode · local gateway" : "Live · Yebo gateway";
     if (cfg.mode !== "judge") mode.classList.add("live");
     $("model-badge").textContent = cfg.model;
     $("brain-spark").textContent = `${cfg.model} · Meta Model API`;
@@ -34,9 +39,11 @@ async function init() {
     } else {
       $("brain-open").disabled = true;
       $("brain-open-label").classList.add("off");
-      $("brain-open-note").textContent = "add BASETEN_API_KEY to .env to use it";
+      $("brain-open-note").textContent = cfg.site === "local" ? "add BASETEN_API_KEY to .env to use it" : "not available on the hosted demo";
     }
-    $("foot").textContent = cfg.mode === "judge"
+    $("foot").textContent = cfg.site !== "local"
+      ? "Hosted demo for judges. Replays play back real runs recorded in judge mode, with no model calls. Live runs (when on) use the bundled invoices, a local stand-in for the Yebo gateway and approval simulated automatically. Dry run: no money moves."
+      : cfg.mode === "judge"
       ? "Judge mode: payments are checked by a local stand-in for the Yebo gateway that enforces the same mission rules. Approval is simulated; the live flow uses your passkey at yebo.dev. Dry run: no money moves."
       : `Live mode: payments are checked by the Yebo gateway (${cfg.gateway}). You approve the limits with your passkey. Dry run: no money moves.`;
     const listed = await (await fetch("/api/samples")).json();
@@ -46,9 +53,65 @@ async function init() {
     if (!state.sampleNames.length) $("use-samples").hidden = true;
     $("use-demo-set").textContent = `Use the demo set (${state.demoSetNames.length} invoices)`;
     $("use-demo-set").hidden = !state.demoSetNames.length;
-    initLab((await (await fetch("/api/lab")).json()).scenarios || []);
+    if (cfg.liveRuns) initLab((await (await fetch("/api/lab")).json()).scenarios || []);
+    hostedLayout(cfg);
+    if (cfg.site !== "local" || new URLSearchParams(location.search).has("replays")) initReplays((await (await fetch("/api/replays")).json()).replays || []);
   } catch {
-    showError("Could not reach the local server.");
+    showError("Could not reach the server.");
+  }
+}
+
+// The hosted demo: no uploads and no voice; without live runs, only the replays.
+function hostedLayout(cfg) {
+  if (cfg.site === "local") return;
+  $("drop").hidden = !cfg.uploads;
+  $("mic").hidden = !cfg.voice;
+  $("voice-sample").hidden = !cfg.voice;
+  const note = $("hosted-note");
+  note.hidden = false;
+  if (!cfg.liveRuns) {
+    $("upload-card").hidden = true;
+    return;
+  }
+  const l = cfg.live;
+  note.textContent = `Live runs use the bundled invoices only: at most ${l.perVisitorPerHour} per visitor per hour, and they stop for the day at $${l.dailyUsd} of model spend ($${l.spentUsd.toFixed(2)} used today). Approval is simulated automatically.`;
+}
+
+// ── Replays ─────────────────────────────────────────────────────────────────
+function initReplays(replays) {
+  state.replays = replays;
+  if (!replays.length) return;
+  const list = $("replay-list");
+  for (const r of replays) {
+    const li = el("li");
+    const text = el("div");
+    text.append(el("strong", "", r.title), el("span", "replay-summary", r.summary));
+    const facts = [`Recorded ${new Date(r.recordedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}`, `${r.mode} mode`, short(r.model || ""), `${r.invoices} invoices`, `${r.allowed} allowed, ${r.denied} denied`];
+    if (r.heard) facts.push(`voice by ${r.heard.model}`);
+    text.append(el("span", "replay-facts", facts.join(" · ")));
+    const play = el("button", "secondary", "Play replay");
+    play.type = "button";
+    play.addEventListener("click", () => playReplay(r));
+    li.append(text, play);
+    list.append(li);
+  }
+  $("replay-card").hidden = false;
+}
+
+async function playReplay(r) {
+  hideError();
+  try {
+    const res = await fetch(`/api/replays/${r.id}/play`, { method: "POST" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || `server returned ${res.status}`);
+    resetRun();
+    state.replay = r;
+    state.runScenario = null;
+    step(`REPLAY of a real run recorded ${new Date(r.recordedAt).toLocaleString("en-US")} in ${r.mode} mode. No model is called now; long waits are shortened.`, "replay-banner");
+    if (r.heard) step(`Spoken instruction, transcribed by ${r.heard.model}: “${r.heard.transcript}”`);
+    listen(data.id);
+  } catch (err) {
+    showError(err.message || String(err));
   }
 }
 
@@ -154,8 +217,9 @@ async function startRun() {
   run.disabled = true;
   run.textContent = "Starting…";
   try {
-    const brain = document.querySelector('input[name="brain"]:checked')?.value || "muse-spark";
+    const brain = brainChoice();
     const body = { goal: $("goal").value, attackDemo: $("attack-demo").checked, brain };
+    if (state.heard && state.heard.transcript === body.goal) body.heard = state.heard;
     if (state.scenario) body.scenario = state.scenario;
     else if (state.samples) body.samples = state.samples;
     else body.files = await Promise.all(state.files.map(async (f) => ({ name: f.name, data: await toBase64(f) })));
@@ -163,6 +227,7 @@ async function startRun() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `server returned ${res.status}`);
     resetRun();
+    state.replay = null;
     state.runScenario = state.scenarios.find((s) => s.id === state.scenario) || null;
     listen(data.id);
     run.textContent = "Running…";
@@ -219,19 +284,22 @@ $("voice-sample").addEventListener("click", async () => {
 async function transcribeRecording(blob) {
   const mic = $("mic");
   mic.disabled = true;
-  voiceStatus("Transcribing with Muse Voice Transcribe…");
+  // In Open mode the recording goes to Muse Spark Open (open weights) instead.
+  const brain = brainChoice();
+  voiceStatus(`Transcribing with ${brain === "muse-spark-open" ? "Muse Spark Open" : "Muse Voice Transcribe"}…`);
   try {
     const wav = await toWav16k(blob);
     const res = await fetch("/api/transcribe", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ audio: await blobToBase64(wav) }), // no keywords: in testing they made the model repeat words ("paypay")
+      body: JSON.stringify({ audio: await blobToBase64(wav), brain }), // no keywords: in testing they made the model repeat words ("paypay")
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || `server returned ${res.status}`);
     $("goal").value = data.transcript;
+    state.heard = { model: data.model, transcript: data.transcript };
     const ready = state.scenario || state.samples || state.files.length;
-    voiceStatus(`Heard: “${data.transcript}”${ready ? "" : " Add invoices, then run the agent."}`);
+    voiceStatus(`Heard (${data.model}): “${data.transcript}”${ready ? "" : " Add invoices, then run the agent."}`);
     if (ready && !$("run").disabled) startRun();
   } catch (err) {
     voiceStatus(`Could not transcribe: ${err.message || err}`, true);
@@ -274,6 +342,7 @@ function resetRun() {
   state.rejected = [];
   for (const id of ["invoices", "plan", "timeline", "hidden-list", "stopped-list"]) $(id).replaceChildren();
   for (const id of ["read-card", "hidden-card", "plan-card", "mission", "totals", "agent-msg", "stopped"]) $(id).hidden = true;
+  $("approve-link").hidden = false;
   $("timeline-empty").hidden = false;
   setMissionStatus("wait", "Waiting for your approval…");
 }
@@ -308,15 +377,18 @@ function handle(e) {
       state.vendorCheck = !!e.vendorCheck;
       if (e.vendorCheck) step("Vendor file on: each payee and bank account must match it");
       $("model-badge").textContent = e.brain === "muse-spark-open" ? `${e.model} (open)` : e.model;
+      state.brain = e.brain;
+      if (e.brain === "muse-spark-open" && e.steps) showOpenSteps(e.steps);
       if (e.agentMode === "attack-demo") {
         step("Attack demo: payment requests hidden in the invoices will be forced through, as if the agent had been hijacked.", "attack-banner");
       }
-      if (e.invoices) step(`Reading ${e.invoices} invoice${e.invoices === 1 ? "" : "s"} with ${e.readerModel}`);
+      if (e.invoices) step(readingLine(e));
+      $("read-title").textContent = readTitle(e);
       break;
-    case "invoice": return addInvoice(e.invoice);
+    case "invoice": return addInvoice(e.invoice, e.readBy);
     case "invoice_error": return addInvoiceError(e.file, e.error);
     case "proposed": return addProposal(e);
-    case "hidden_requests": return showHidden(e.requests);
+    case "hidden_requests": return showHidden(e.requests, e.model);
     case "allowances":
       for (const a of e.allowances) step(`24-hour limit for ${a.vendor}: ${usd(a.max_24h_usd)}, ${usd(a.used_usd)} already used`);
       return;
@@ -329,7 +401,10 @@ function handle(e) {
     case "mission": return showMission(e);
     case "mission_result":
       $("approve-link").hidden = true; // resolved: nothing left to approve
-      if (e.approved) { setMissionStatus("ok", "Approved. Yebo now checks every payment."); step("You approved the limits"); }
+      if (e.approved) {
+        setMissionStatus("ok", "Approved. Yebo now checks every payment.");
+        step(state.replay ? "The limits were approved (simulated approval, judge mode, when this run was recorded)" : state.cfg.site !== "local" ? "The limits were approved automatically (simulated on the hosted demo)" : "You approved the limits");
+      }
       else { setMissionStatus("no", "Not approved. Nothing will run."); step("The limits were not approved, so nothing runs"); }
       break;
     case "decision": return addDecision(e);
@@ -345,11 +420,34 @@ function handle(e) {
 }
 
 // ── Rendering ───────────────────────────────────────────────────────────────
-function addInvoice(v) {
+// "Reading 5 invoices with muse-spark-open", or which model reads how many, and why.
+// (Recordings made before the reader could differ only have readerModel.)
+function readingLine(e) {
+  const head = `Reading ${e.invoices} invoice${e.invoices === 1 ? "" : "s"}`;
+  const groups = e.reading || [{ model: e.readerModel, count: e.invoices }];
+  if (groups.length <= 1) return `${head} with ${groups[0]?.model}`;
+  return `${head}: ${groups.map((g) => `${g.count} with ${g.model}${g.why ? ` (${g.why})` : ""}`).join(", ")}`;
+}
+
+function readTitle(e) {
+  const groups = e.reading || [{ model: e.readerModel }];
+  if (groups.length > 1) return "What the models read";
+  return groups[0]?.model === "muse-spark-open" ? "What Muse Spark Open read" : "What Muse Spark read";
+}
+
+// Open mode: which steps ran on open weights, and which did not.
+function showOpenSteps(steps) {
+  const open = steps.filter((s) => s.open);
+  const closed = steps.filter((s) => !s.open);
+  step(`Open weights (${short(open[0]?.model || "muse-spark-open")}): ${open.map((s) => s.step).join(", ")}`);
+  if (closed.length) step(`Not open weights: ${closed.map((s) => `${s.step} with ${s.model}`).join(", ")}`, "note-step");
+}
+
+function addInvoice(v, readBy) {
   $("read-card").hidden = false;
   const tr = el("tr");
   const payee = el("td", "", v.payee);
-  payee.append(el("span", "file", v.file));
+  payee.append(el("span", "file", readBy ? `${v.file} · read by ${readBy}` : v.file));
   tr.append(payee, el("td", "num", `${v.currency === "USD" ? usd(v.amount) : `${v.currency} ${v.amount}`}`), el("td", "", v.due_date || "—"), el("td", "", v.invoice_number || "—"));
   $("invoices").append(tr);
   if (v.notes) {
@@ -393,7 +491,9 @@ function addProposal(e) {
   $("plan").append(li);
 }
 
-function showHidden(requests) {
+function showHidden(requests, model) {
+  const who = !model || model.startsWith("muse-spark-1") ? "Muse Spark" : model === "muse-spark-open" ? "Muse Spark Open" : model;
+  $("hidden-intro").textContent = `${who} found these instructions written inside the invoices. They are not invoices, and the agent does not follow them.`;
   const list = $("hidden-list");
   for (const r of requests) {
     const li = el("li");
@@ -403,7 +503,7 @@ function showHidden(requests) {
     list.append(li);
   }
   $("hidden-card").hidden = false;
-  step(`Found ${requests.length} hidden payment request${requests.length === 1 ? "" : "s"} inside the invoices`, "DENY");
+  step(`${who} found ${requests.length} hidden payment request${requests.length === 1 ? "" : "s"} inside the invoices`, "DENY");
 }
 
 function showMission(e) {
@@ -417,9 +517,14 @@ function showMission(e) {
     : "Built from the agent's plan (no invoices in this run).";
   $("m-expires").textContent = new Date(e.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const link = $("approve-link");
-  link.hidden = false;
-  link.href = e.authorizeUrl;
-  link.textContent = state.mode === "judge" ? "Open approval page (simulated)" : "Approve with your passkey";
+  // A replay or the hosted demo has no approval page to open: approval was simulated.
+  const simulated = state.replay || state.cfg.site !== "local" || !e.authorizeUrl;
+  link.hidden = simulated;
+  if (!simulated) {
+    link.href = e.authorizeUrl;
+    link.textContent = state.mode === "judge" ? "Open approval page (simulated)" : "Approve with your passkey";
+  }
+  if (simulated) setMissionStatus("wait", state.replay ? "Approval was simulated (judge mode) when this run was recorded…" : "Approval is simulated automatically on the hosted demo…");
   step(`Mission requested: ${e.limits.payees.length} payee${e.limits.payees.length === 1 ? "" : "s"}, up to ${usd(e.limits.per_payment_usd)} each, ${usd(e.limits.total_usd)} in total`);
 }
 

@@ -14,9 +14,9 @@ import { extname, join } from "node:path";
 import { DRY_RUN_OUTCOME } from "./yebo.js";
 import { readInvoiceFile, SUPPORTED_EXTENSIONS } from "./invoice.js";
 import { startGateway, modeBanner } from "./gatewayMode.js";
-import { transcribe, VOICE_MODEL } from "./voice.js";
+import { openVoiceModel, transcribe, transcribeOpen, VOICE_MODEL } from "./voice.js";
 import { readFile } from "node:fs/promises";
-import { runAgent, type AgentMode, type RunEvent } from "./runner.js";
+import { readingLine, runAgent, type AgentMode, type RunEvent } from "./runner.js";
 import type { Brain } from "./muse.js";
 
 function print(e: RunEvent, mode: "live" | "judge") {
@@ -29,7 +29,10 @@ function print(e: RunEvent, mode: "live" | "judge") {
       console.log(`Instruction: "${e.goal}" (today is ${e.today})`);
       console.log(`Agent brain: ${e.brainLabel}, ${e.model}`);
       if (e.vendorCheck) console.log("Vendor file: on (payee and bank account must match it)");
-      if (e.invoices) console.log(`\nReading ${e.invoices} invoice${e.invoices === 1 ? "" : "s"} with ${e.readerModel}...`);
+      if (e.brain === "muse-spark-open") {
+        for (const st of e.steps) console.log(`  ${st.open ? "open weights" : "NOT open    "}  ${st.step}: ${st.model}`);
+      }
+      if (e.invoices) console.log(`\n${readingLine(e.invoices, e.reading)}...`);
       break;
     case "invoice": {
       const v = e.invoice;
@@ -45,7 +48,7 @@ function print(e: RunEvent, mode: "live" | "judge") {
       else console.log(`\nProposed: $${e.proposal.amount_usd} to ${e.proposal.payee} (${e.proposal.memo})${e.matchesInvoice === false ? "  << NOT ON ANY INVOICE" : ""}`);
       break;
     case "hidden_requests":
-      console.log(`\nHidden payment requests found in invoice text (not followed by the agent):`);
+      console.log(`\nHidden payment requests found in invoice text by ${e.model} (not followed by the agent):`);
       for (const r of e.requests) console.log(`  ${r.invoice_file}: $${r.amount_usd} to ${r.payee}  "${r.quote}"`);
       break;
     case "allowances":
@@ -133,8 +136,10 @@ async function main() {
   const { files, agentMode, brain } = args;
   let goal = args.goal;
   if (args.voice) {
-    console.log(`Transcribing ${args.voice} with ${VOICE_MODEL}...`);
-    goal = await transcribe(await readFile(args.voice));
+    const open = brain === "muse-spark-open";
+    console.log(`Transcribing ${args.voice} with ${open ? openVoiceModel() : VOICE_MODEL}...`);
+    const wav = await readFile(args.voice);
+    goal = open ? await transcribeOpen(wav) : await transcribe(wav);
     console.log(`Heard: "${goal}"`);
   }
   const sources = await Promise.all(files.map((f) => readInvoiceFile(f)));
