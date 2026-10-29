@@ -2,6 +2,8 @@
 
 > **Draft only.** Nothing here has been submitted. Review it, then paste it into the hackathon form yourself.
 
+**Demo video (3 min):** https://youtu.be/QfSVHJDowAU
+
 **Hosted demo (replays, no key needed):** https://yebo-muse-demo-production.up.railway.app
 
 **Yebo AP Agent: AI pays your invoices. It cannot be tricked into paying anyone else.** Meta's Muse models read the invoices and plan the payments; Yebo checks every payment against limits a human approved.
@@ -76,7 +78,7 @@ Every model name and API shape was checked against dev.meta.ai (and docs.baseten
 - The vendor file (payees, bank accounts, per-vendor caps) and the duplicate check
 - Judge mode: a local stand-in for the Yebo gateway with a simulated approval page
 - The web app with the live decision timeline and the one-click demo set
-- Replays of real recorded runs, and a hosted-demo mode with strict limits (not deployed; see `HOSTING.md`)
+- Replays of real recorded runs, and a hosted-demo mode with strict limits (replay site deployed at https://yebo-muse-demo-production.up.railway.app; live runs not deployed; see `HOSTING.md`)
 - Sample and test invoices, 143 tests (including 18 adversarial payment tests), and a dated log of every change (`HACKATHON_LOG.md`)
 
 **Pre-existing, not part of this submission:** the Yebo authorization gateway (`gateway.yebo.dev`) and the yebo.dev passkey approval page. The project calls the gateway over the network like any customer; its source is not in the repository. Small supporting changes were made to it during the hackathon (an agent-only key that can never approve missions, the approval page taking the approver from the signed-in account, and showing the agent's name and limits); those are not part of the submission either. Judge mode runs everything without them.
@@ -85,8 +87,8 @@ Every model name and API shape was checked against dev.meta.ai (and docs.baseten
 
 - **Repository:** https://github.com/Unclefole/yebo-muse-agent (public)
 - **Release:** the latest release on the repository's Releases page
-- **Hosted demo for judges:** **NOT DEPLOYED** (plan in `HOSTING.md`; replays of real runs, no key needed)
-- **Demo video:** **TO ADD** (3 minutes, recorded from `DEMO_SCRIPT.md`)
+- **Hosted demo for judges:** https://yebo-muse-demo-production.up.railway.app (replays of real runs, no key needed)
+- **Demo video:** https://youtu.be/QfSVHJDowAU (3 minutes, recorded from `DEMO_SCRIPT.md`)
 
 ## Bonus prizes we are entering
 
