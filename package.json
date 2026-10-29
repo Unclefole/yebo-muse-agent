@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "tsx src/agent.ts",
     "web": "tsx src/web/server.ts",
+    "start": "npm run web",
     "extract": "tsx src/extract.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",

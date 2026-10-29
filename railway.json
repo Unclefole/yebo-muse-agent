@@ -1,0 +1,5 @@
+{
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": { "builder": "RAILPACK", "buildCommand": "npm ci --include=dev" },
+  "deploy": { "startCommand": "npm run web", "restartPolicyType": "ON_FAILURE", "restartPolicyMaxRetries": 5 }
+}

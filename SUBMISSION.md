@@ -2,6 +2,8 @@
 
 > **Draft only.** Nothing here has been submitted. Review it, then paste it into the hackathon form yourself.
 
+**Hosted demo (replays, no key needed):** https://yebo-muse-demo-production.up.railway.app
+
 **Yebo AP Agent: AI pays your invoices. It cannot be tricked into paying anyone else.** Meta's Muse models read the invoices and plan the payments; Yebo checks every payment against limits a human approved.
 
 **Three Meta models:** Muse Spark 1.3 (reads invoices with vision, flags hidden payment requests, plans), Muse Voice Transcribe (spoken instructions), Muse Spark Open via Baseten (open weights: in Open mode it transcribes, reads invoice images, flags hidden requests and plans; PDFs stay on Muse Spark 1.3 because Baseten does not accept them).

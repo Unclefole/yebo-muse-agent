@@ -285,3 +285,15 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - **#17 checks unavailable:** pass. 503 on payment and retry, approval status down, unreadable ledger, garbage or half-allow answers: all DENY or stop, nothing allowed. The hidden-request check is a warning and fails open; recorded in the README.
 - **All 18:** 16 pass (7 after fixes here: 3, 5, 9, 12, 13, 15, 18), 1 partial (#7), 1 fail (#11), both from "approval is a cap, not one exact order". None run against the real Yebo gateway yet.
 - **Tests:** 127 → 143.
+
+## 2026-10-29 (hosted replay demo deployed)
+
+- **Live:** https://yebo-muse-demo-production.up.railway.app. A new Railway project, `yebo-muse-demo`, separate from Yebo's. Its only variable is `YEBO_SITE=replay`; no API keys, no live mode. Deployed with `railway up` from a clean `git archive` of `main`, so no local files (`.env`, `.data/`) were uploaded.
+- **First build failed:** Railpack found no start command. Added `"start": "npm run web"` to `package.json`, plus `railway.json` (build `npm ci --include=dev`) and `.nvmrc` (Node 22).
+- **Checked live:**
+  - `/api/config` reports `site: replay`, no live runs, no uploads, no voice. `/api/runs` and `/api/transcribe` answer 403.
+  - Security headers (Content-Security-Policy) are served.
+  - Desktop (1366 px), in Chrome: all three replays played to the end and matched their recordings. Demo set 5 ALLOW / 2 DENY, split invoices 2 / 8, voice + Open 4 / 2. No console errors.
+  - Phone (390 px), headless Chrome: layout fits with no horizontal scroll; the voice replay started playing. The full decision counts at phone width were not confirmed: two later runs failed on this machine's network (`ERR_NETWORK_CHANGED`, a load timeout).
+- **Staging gateway found (read-only):** the `yebo-gateway` project's staging environment serves `yebo-gateway-staging.up.railway.app`; production serves `gateway.yebo.dev`. Nothing in that project was changed.
+- README and `SUBMISSION.md` link the demo at the top; `HOSTING.md` says replay is deployed and live is not.
