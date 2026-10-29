@@ -403,7 +403,11 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
     // over a vendor's cap, anything matching no approved invoice) goes after them, when
     // the budget left is zero, and Yebo denies it.
     const unpaid: Invoice[] = [];
-    if (!missionToken && (proposals.length || forced.length)) {
+    // A reused mission (YEBO_MISSION_TOKEN) is not approved again, but the invoice checks
+    // still run: its payments go in invoice order, and with invoices, a proposal that pays
+    // no invoice that passed the checks is not sent (it needs a new approval).
+    const reused = !!missionToken;
+    if (proposals.length || forced.length) {
       const last24h = ledger ? ledger.spentSince(Date.now() - DAY_MS) : new Map<string, number>();
       if (limited.length) {
         emit({ type: "allowances", allowances: limited.map((v) => ({ vendor: v.name, max_24h_usd: v.max_24h_usd!, used_usd: last24h.get(v.name) ?? 0 })) });
@@ -415,11 +419,13 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
         chosen = checked.passed;
         unpaid.push(...checked.passed);
       }
-      const limits = invoices.length
-        ? limitsFromInvoices(chosen.map((i) => ({ ...i, payee: onFile(i.payee, vendors) ?? i.payee })))
-        : planLimits(proposals, vendors, last24h);
-      if (limits) missionToken = await approveMission(input.goal, limits, invoices.length ? "invoices" : "proposals", emit);
-      else emit({ type: "no_mission", reason: invoices.length ? "the plan matches none of the invoices that can be paid in USD and pass the checks" : "the plan names no payee on the vendor file" });
+      if (!reused) {
+        const limits = invoices.length
+          ? limitsFromInvoices(chosen.map((i) => ({ ...i, payee: onFile(i.payee, vendors) ?? i.payee })))
+          : planLimits(proposals, vendors, last24h);
+        if (limits) missionToken = await approveMission(input.goal, limits, invoices.length ? "invoices" : "proposals", emit);
+        else emit({ type: "no_mission", reason: invoices.length ? "the plan matches none of the invoices that can be paid in USD and pass the checks" : "the plan names no payee on the vendor file" });
+      }
     }
     // What goes to Yebo: the vendor file's name for the payee, when it has one.
     const toYebo = (p: PaymentProposal): PaymentProposal => ({ ...p, payee: onFile(p.payee, vendors) ?? p.payee });
@@ -431,6 +437,11 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
         ledger.record({ vendor: vendor.name, amount_usd: p.amount_usd, at: new Date().toISOString(), ...(r.receipt ? { receipt: r.receipt } : {}) });
       }
     };
+
+    const notCovered = reused && invoices.length > 0;
+    const check = async (proposal: PaymentProposal, pays: boolean) => notCovered && !pays
+      ? { decision: "REQUIRE_APPROVAL" as Decision, outcome: "needs a new approval", reason: "pays no invoice that passed the checks, so the reused mission does not cover it (not sent to Yebo)", receipt: undefined }
+      : checkPayment(missionToken, toYebo(proposal));
 
     // 4. Every proposal is checked by Yebo: first the agent's proposals that pay an approved
     //    invoice, then its other proposals, then the forced ones.
@@ -444,14 +455,14 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
       } else after.push(p);
     }
     for (const { id, proposal } of [...first, ...after]) {
-      const r = await checkPayment(missionToken, toYebo(proposal));
+      const r = await check(proposal, first.some((p) => p.id === id));
       recordSpend(proposal, r);
       const result: DecisionResult = { id, proposal, decision: r.decision, outcome: r.outcome, reason: r.reason, receipt: r.receipt };
       results.push(result);
       emit({ type: "decision", ...result });
     }
     for (const f of forced) {
-      const r = await checkPayment(missionToken, toYebo(f.proposal));
+      const r = await check(f.proposal, false);
       recordSpend(f.proposal, r);
       const result: DecisionResult = { id: f.id, proposal: f.proposal, forced: true, decision: r.decision, outcome: r.outcome, reason: r.reason, receipt: r.receipt };
       results.push(result);

@@ -326,3 +326,131 @@ test("#18 direct: without a valid signature or an approved mission token, nothin
   assert.equal((await execute(`${payload}.${"0".repeat(64)}`, "merchant_A", 49)).status, 401, "forged token");
   assert.deepEqual(moved(), { count: 0, total: 0, payees: [] });
 });
+
+// 2. The same order described as "subscription", "subscrption", "subscription renewal": the
+// wording cannot authorize another charge. The description never reaches the gateway.
+
+test("#2 agent: three wordings of a subscription for the same order, one allowed", async () => {
+  turns = [[pay(49, "subscription"), pay(49, "subscrption"), pay(49, "subscription renewal")]];
+  const ev = await runWith();
+  const mission = ev.find((e) => e.type === "mission");
+  assert.ok(mission?.type === "mission");
+  assert.equal(mission.limits.total_usd, 49);
+  assert.deepEqual(decisions(ev).map((d) => d.decision), ["ALLOW", "DENY", "DENY"]);
+  assert.deepEqual(moved(), { count: 1, total: 49, payees: ["merchant_A"] });
+});
+
+test("#2 direct: descriptions on the request change nothing", async () => {
+  const token = await approved49();
+  const statuses = [];
+  for (const description of ["subscription", "subscrption", "subscription renewal"]) {
+    statuses.push((await execute(token, "merchant_A", 49, { description, memo: description, recurring_consent: description })).status);
+  }
+  assert.deepEqual(statuses, [200, 402, 402]);
+  assert.deepEqual(moved(), { count: 1, total: 49, payees: ["merchant_A"] });
+});
+
+// 3. An invoice number with a zero-width space or a Cyrillic O: flagged, never a new bill.
+
+test("#3 agent: look-alike copies of the invoice number are refused as tampered", async () => {
+  invoices = [
+    ORDER,
+    { ...ORDER, file: "ord-1042-zw.png", invoice_number: "ORD-1042​" },
+    { ...ORDER, file: "ord-1042-cyr.png", invoice_number: "ОRD-1042" },
+  ];
+  turns = [[pay(49, "ORD-1042"), pay(49, "ORD-1042​"), pay(49, "ОRD-1042")]];
+  const ev = await runWith();
+  const refused = ev.find((e) => e.type === "invoices_refused");
+  assert.ok(refused?.type === "invoices_refused");
+  assert.deepEqual(refused.rejected.map((r) => [r.file, r.control]), [["ord-1042-zw.png", "reference"], ["ord-1042-cyr.png", "reference"]]);
+  assert.match(refused.rejected[1].reason, /<U\+041E>RD-1042.*look-alike.*matches invoice ORD-1042/);
+  const mission = ev.find((e) => e.type === "mission");
+  assert.ok(mission?.type === "mission");
+  assert.equal(mission.limits.total_usd, 49, "the limits cover one $49 payment, not three");
+  assert.deepEqual(moved(), { count: 1, total: 49, payees: ["merchant_A"] });
+});
+
+test("#3 agent: a tampered invoice number on its own is refused, not paid", async () => {
+  invoices = [{ ...ORDER, invoice_number: "ОRD-1042" }];
+  turns = [[pay(49, "ОRD-1042")]];
+  const ev = await runWith();
+  const refused = ev.find((e) => e.type === "invoices_refused");
+  assert.ok(refused?.type === "invoices_refused" && refused.rejected[0].control === "reference");
+  assert.ok(!ev.some((e) => e.type === "mission"));
+  assert.deepEqual(moved(), { count: 0, total: 0, payees: [] });
+});
+
+test("#3 direct: an invoice reference on the request is not a new obligation", async () => {
+  const token = await approved49();
+  const statuses = [];
+  for (const invoice_ref of ["ORD-1042", "ORD-1042​", "ОRD-1042"]) statuses.push((await execute(token, "merchant_A", 49, { invoice_ref })).status);
+  assert.deepEqual(statuses, [200, 402, 402]);
+  assert.deepEqual(moved(), { count: 1, total: 49, payees: ["merchant_A"] });
+});
+
+// 6. $30 + $30 against the $49 approval: the total can't exceed $49.
+
+test("#6 agent: a $49 invoice split into $30 + $30 gets no approval at all", async () => {
+  turns = [[pay(30, "ORD-1042 part 1"), pay(30, "ORD-1042 part 2")]];
+  const ev = await runWith();
+  assert.ok(!ev.some((e) => e.type === "mission"), "neither part matches the invoice, so nothing is approved");
+  assert.deepEqual(moved(), { count: 0, total: 0, payees: [] });
+});
+
+test("#6 agent: with the $49 mission already approved, $30 + $30 stops at $30", async () => {
+  invoices = [];
+  process.env.YEBO_MISSION_TOKEN = await approved49();
+  turns = [[pay(30, "ORD-1042 part 1"), pay(30, "ORD-1042 part 2")]];
+  const ev = await runWith();
+  assert.deepEqual(decisions(ev).map((d) => d.decision), ["ALLOW", "DENY"]);
+  assert.deepEqual(moved(), { count: 1, total: 30, payees: ["merchant_A"] });
+});
+
+test("#6 direct: $30 then $30 is refused at the second; known limit: $30 then $19 both fit the cap", async () => {
+  const token = await approved49();
+  assert.equal((await execute(token, "merchant_A", 30)).status, 200);
+  const second = await execute(token, "merchant_A", 30);
+  assert.equal(second.status, 402);
+  assert.match(second.data.reason, /budget left \(19\)/);
+  // Approval is a cap, not one exact order: the rest of the budget can still be used.
+  assert.equal((await execute(token, "merchant_A", 19)).status, 200);
+  assert.deepEqual(moved(), { count: 2, total: 49, payees: ["merchant_A"] });
+});
+
+// 7. A $4.99 fee added at execution needs a new approval.
+
+test("#7 agent: a $4.99 fee next to the $49 payment is denied; $53.99 in one gets no approval", async () => {
+  turns = [[pay(4.99, "service fee for ORD-1042"), pay(49, "ORD-1042")]];
+  let ev = await runWith();
+  assert.deepEqual(decisions(ev).map((d) => [d.proposal.amount_usd, d.decision]), [[49, "ALLOW"], [4.99, "DENY"]], "the invoice is paid first; the fee finds no budget");
+  assert.deepEqual(moved(), { count: 1, total: 49, payees: ["merchant_A"] });
+
+  gw.executions.length = 0;
+  turns = [[pay(53.99, "ORD-1042 including $4.99 fee")]];
+  ev = await runWith();
+  assert.ok(!ev.some((e) => e.type === "mission"));
+  assert.deepEqual(moved(), { count: 0, total: 0, payees: [] });
+});
+
+test("#7 agent: with the mission already approved, a fee proposed first is not sent and the invoice is paid", async () => {
+  process.env.YEBO_MISSION_TOKEN = await approved49();
+  turns = [[pay(4.99, "service fee for ORD-1042"), pay(49, "ORD-1042")]];
+  const ev = await runWith();
+  assert.deepEqual(decisions(ev).map((d) => [d.proposal.amount_usd, d.decision]), [[49, "ALLOW"], [4.99, "REQUIRE_APPROVAL"]]);
+  assert.deepEqual(moved(), { count: 1, total: 49, payees: ["merchant_A"] });
+});
+
+test("#7 direct: $53.99 is over the per-payment limit and a fee after $49 is refused; known limit: a fee sent first fits the cap", async () => {
+  let token = await approved49();
+  assert.equal((await execute(token, "merchant_A", 53.99, { fee: 4.99 })).status, 403);
+  assert.equal((await execute(token, "merchant_A", 49)).status, 200);
+  assert.equal((await execute(token, "merchant_A", 4.99, { description: "service fee" })).status, 402);
+  assert.deepEqual(moved(), { count: 1, total: 49, payees: ["merchant_A"] });
+
+  // The gateway cannot tell a fee from the order: sent first, the fee fits and the order no longer does.
+  gw.executions.length = 0;
+  token = await approved49();
+  assert.equal((await execute(token, "merchant_A", 4.99, { description: "service fee" })).status, 200);
+  assert.equal((await execute(token, "merchant_A", 49)).status, 402);
+  assert.deepEqual(moved(), { count: 1, total: 4.99, payees: ["merchant_A"] });
+});

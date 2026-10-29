@@ -3,6 +3,8 @@
 // any payment for a removed invoice (payee not approved, or over the budget).
 //
 //   duplicates      always on: a second invoice with the same payee and invoice number
+//                   (look-alike letters count as the real ones); an invoice number with a
+//                   hidden character or mixed scripts is refused as tampered
 //   vendor file     on by default (demo/vendors.json; YEBO_VENDORS=path/to/file to use
 //                   another, YEBO_VENDORS=off to turn it off): the payee must be on the
 //                   vendor file, and every account number in the invoice's payment details
@@ -28,11 +30,30 @@ export type Vendor = {
   status?: "active" | "inactive"; // active when absent
 };
 // Which check left an invoice out of the limits. All of them run in the agent's code.
-export type Control = "duplicate" | "unknown_vendor" | "inactive" | "account" | "per_run" | "24h";
+export type Control = "reference" | "duplicate" | "unknown_vendor" | "inactive" | "account" | "per_run" | "24h";
 export type Rejection = { file: string; payee: string; amount: number; control: Control; reason: string };
 
 const norm = (s: string) => s.normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
-const invoiceKey = (s: string) => s.normalize("NFKC").replace(/[^0-9a-z]/gi, "").toUpperCase();
+// Cyrillic and Greek letters that look like Latin ones, so a look-alike invoice number
+// ("ОRD-1042" with a Cyrillic О) is the same invoice as the real one.
+const LOOKALIKES: Record<string, string> = Object.fromEntries(
+  [..."АВЕЅІЈКМНОРСТХУаеіјорсхуѕԁԛԝΑΒΕΖΗΙΚΜΝΟΡΤΥΧοιν"].map((c, i) => [c, "ABESIJKMHOPCTXYaeijopcxysdqwABEZHIKMNOPTYXoiv"[i]]),
+);
+const invoiceKey = (s: string) => [...s.normalize("NFKC")].map((c) => LOOKALIKES[c] ?? c).join("").replace(/[^0-9a-z]/gi, "").toUpperCase();
+
+// Why an invoice number looks tampered with, or null: a hidden character (zero-width space,
+// direction mark, soft hyphen...) or Latin letters mixed with Cyrillic or Greek ones. Such an
+// invoice is refused, never paid as a new bill.
+export function referenceRefusal(invoiceNumber: string | null): string | null {
+  if (!invoiceNumber) return null;
+  const hidden = [...invoiceNumber].filter((c) => /[\p{Cf}\p{Zl}\p{Zp}\u00a0\u2000-\u200a\u202f\u205f\u3000]/u.test(c));
+  const shown = JSON.stringify(invoiceNumber.replace(/[^\x20-\x7e]/g, (c) => `<U+${c.codePointAt(0)!.toString(16).toUpperCase().padStart(4, "0")}>`));
+  if (hidden.length) return `invoice number ${shown} contains a hidden character`;
+  if (/\p{Script=Latin}/u.test(invoiceNumber) && /[\p{Script=Cyrillic}\p{Script=Greek}]/u.test(invoiceNumber)) {
+    return `invoice number ${shown} mixes Latin letters with look-alike Cyrillic or Greek ones`;
+  }
+  return null;
+}
 
 // The vendor file: a JSON list of { "name": "...", "accounts": ["4821"], "max_per_run_usd": 89,
 // "max_24h_usd": 1000, "status": "inactive" } (the last three are optional). Anything
@@ -145,9 +166,12 @@ export function checkInvoices(
   for (const inv of invoices) {
     const key = inv.invoice_number ? `${norm(inv.payee)}|${invoiceKey(inv.invoice_number)}` : null;
     const first = key ? seen.get(key) : undefined;
-    let refusal: { control: Control; reason: string } | null = first
-      ? { control: "duplicate", reason: `duplicate of invoice ${first.invoice_number} in ${first.file}` }
-      : null;
+    const tampered = referenceRefusal(inv.invoice_number);
+    let refusal: { control: Control; reason: string } | null = tampered
+      ? { control: "reference", reason: first ? `${tampered}; it matches invoice ${first.invoice_number} in ${first.file}` : tampered }
+      : first
+        ? { control: "duplicate", reason: `duplicate of invoice ${first.invoice_number} in ${first.file}` }
+        : null;
     if (!refusal && vendors) refusal = vendorMismatch(inv, vendors);
     const vendor = vendors ? vendorFor(inv.payee, vendors) : undefined;
     const before = vendor ? paid.get(vendor.name) ?? 0 : 0;
