@@ -133,6 +133,15 @@ export async function waitForApproval(mission: Mission, pollMs = 3_000): Promise
 // back. Yebo may have allowed it, so it is not retried and is counted as spent.
 export const UNKNOWN_OUTCOME = "outcome unknown (no answer from Yebo)";
 
+// Why Yebo refused, in words: its reason, or for a mission that stopped (revoked, denied,
+// expired) what happened to it, with the gateway's error code.
+function denialReason(status: number, data: any): string {
+  if (typeof data?.reason === "string") return data.reason;
+  if (data?.error === "TOKEN_NOT_ACTIVE" && typeof data.status === "string") return `the mission is ${data.status} (TOKEN_NOT_ACTIVE)`;
+  if (data?.error === "TOKEN_EXPIRED") return "the mission has expired (TOKEN_EXPIRED)";
+  return (data?.error ?? `gateway returned ${status}`) as string;
+}
+
 export async function checkPayment(missionToken: string, proposal: PaymentProposal): Promise<{
   status: number; decision: Decision; outcome: string; reason?: string; receipt?: string; raw: any; unknown?: true;
 }> {
@@ -165,7 +174,7 @@ export async function checkPayment(missionToken: string, proposal: PaymentPropos
     status,
     decision,
     outcome: allowed ? DRY_RUN_OUTCOME : "denied",
-    reason: allowed ? undefined : ((data?.reason ?? data?.error ?? `gateway returned ${status}`) as string),
+    reason: allowed ? undefined : denialReason(status, data),
     receipt: data?.receipt_id as string | undefined,
     raw: data,
   };

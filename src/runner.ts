@@ -20,7 +20,7 @@ import { chat, endpoint, shortName, type Brain, type Message, type Tool } from "
 import { checkPayment, requestMission, waitForApproval, DRY_RUN_OUTCOME, UNKNOWN_OUTCOME, type Decision, type PaymentProposal } from "./yebo.js";
 import { extractInvoiceSource, readerFor, type Invoice, type InvoiceSource } from "./invoice.js";
 import { findHiddenRequests, type HiddenRequest } from "./injection.js";
-import { accountEndings, capRefusal, checkInvoices, loadVendors, vendorFor, vendorName, type Rejection, type Vendor } from "./vendors.js";
+import { accountEndings, capRefusal, checkInvoices, loadVendors, vendorFor, vendorName, vendorRefusal, type Rejection, type Vendor } from "./vendors.js";
 import { DAY_MS, fileLedger, type Ledger } from "./ledger.js";
 import type { GatewayMode } from "./gatewayMode.js";
 
@@ -294,7 +294,9 @@ async function approveMission(goal: string, limits: MissionLimits, source: "invo
 
 // vendors: use this vendor file instead of YEBO_VENDORS (null: off). ledger: record 24-hour
 // spend here instead of the vendor ledger file (the Controls Lab gives each run its own).
-export type RunInput = { goal: string; sources: InvoiceSource[]; agentMode?: AgentMode; brain?: Brain; vendors?: Vendor[] | null; ledger?: Ledger };
+// reloadVendors: how to read the vendor file again after approval (default: YEBO_VENDORS
+// again when vendors is not given; none when it is).
+export type RunInput = { goal: string; sources: InvoiceSource[]; agentMode?: AgentMode; brain?: Brain; vendors?: Vendor[] | null; ledger?: Ledger; reloadVendors?: () => Vendor[] | null };
 
 export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit): Promise<DecisionResult[]> {
   const results: DecisionResult[] = [];
@@ -438,31 +440,56 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
       }
     };
 
-    const notCovered = reused && invoices.length > 0;
-    const check = async (proposal: PaymentProposal, pays: boolean) => notCovered && !pays
-      ? { decision: "REQUIRE_APPROVAL" as Decision, outcome: "needs a new approval", reason: "pays no invoice that passed the checks, so the reused mission does not cover it (not sent to Yebo)", receipt: undefined }
-      : checkPayment(missionToken, toYebo(proposal));
+    // The vendor file is read again after approval. An approved invoice whose vendor or bank
+    // account no longer matches it (changed while the human was approving) is not paid: it
+    // needs a new approval. A file that cannot be read stops every payment.
+    const stale = new Map<Invoice, string>();
+    const reload = input.reloadVendors ?? (input.vendors === undefined ? loadVendors : undefined);
+    if (vendors && missionToken && unpaid.length && reload) {
+      let fresh: Vendor[] | null = null;
+      let failed = "";
+      try {
+        fresh = reload();
+        if (!fresh) failed = "the vendor file was turned off after approval";
+      } catch (err) {
+        failed = `the vendor file could not be read again after approval (${err instanceof Error ? err.message : String(err)})`;
+      }
+      for (const inv of unpaid) {
+        const why = failed || (fresh && vendorRefusal(inv, fresh));
+        if (why) stale.set(inv, failed ? why : `the vendor file changed after approval: ${why}`);
+      }
+    }
+    // Proposals that pay no checked invoice rely on the budget being used up by the ones that
+    // do. With a reused mission, or when some approved invoices are now held back, it may not
+    // be, so they are not sent.
+    const notCovered = (reused && invoices.length > 0) || stale.size > 0;
+    const notSent = (reason: string) => ({ decision: "REQUIRE_APPROVAL" as Decision, outcome: "needs a new approval", reason: `${reason} (not sent to Yebo)`, receipt: undefined });
+    const check = async (proposal: PaymentProposal, invoice?: Invoice) => {
+      const held = invoice && stale.get(invoice);
+      if (held) return notSent(held);
+      if (notCovered && !invoice) return notSent(reused ? "pays no invoice that passed the checks, so the reused mission does not cover it" : "pays no invoice that is still approved");
+      return checkPayment(missionToken, toYebo(proposal));
+    };
 
     // 4. Every proposal is checked by Yebo: first the agent's proposals that pay an approved
     //    invoice, then its other proposals, then the forced ones.
-    const first: typeof planned = [];
-    const after: typeof planned = [];
+    const first: (typeof planned[number] & { invoice?: Invoice })[] = [];
+    const after: typeof first = [];
+    const open = [...unpaid];
     for (const p of planned) {
-      const slot = unpaid.findIndex((i) => sameAs(p.proposal, i));
-      if (slot >= 0) {
-        unpaid.splice(slot, 1);
-        first.push(p);
-      } else after.push(p);
+      const slot = open.findIndex((i) => sameAs(p.proposal, i));
+      if (slot >= 0) first.push({ ...p, invoice: open.splice(slot, 1)[0] });
+      else after.push(p);
     }
-    for (const { id, proposal } of [...first, ...after]) {
-      const r = await check(proposal, first.some((p) => p.id === id));
+    for (const { id, proposal, invoice } of [...first, ...after]) {
+      const r = await check(proposal, invoice);
       recordSpend(proposal, r);
       const result: DecisionResult = { id, proposal, decision: r.decision, outcome: r.outcome, reason: r.reason, receipt: r.receipt };
       results.push(result);
       emit({ type: "decision", ...result });
     }
     for (const f of forced) {
-      const r = await check(f.proposal, false);
+      const r = await check(f.proposal);
       recordSpend(f.proposal, r);
       const result: DecisionResult = { id: f.id, proposal: f.proposal, forced: true, decision: r.decision, outcome: r.outcome, reason: r.reason, receipt: r.receipt };
       results.push(result);

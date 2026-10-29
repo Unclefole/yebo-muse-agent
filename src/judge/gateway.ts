@@ -8,7 +8,8 @@
 //     timestamp within 5 minutes
 //   - a mission must carry enforceable limits: capabilities, per-payment limit, total
 //     budget, and for payments a non-empty payee list and currency list
-//   - a mission lasts 1 to 60 minutes and needs a human approval before anything runs
+//   - a mission lasts 1 to 60 minutes and needs a human approval before anything runs; the
+//     human can revoke it from the same page, and its token stops working at once
 //   - each payment must be in an approved, unexpired mission, for an allowed capability,
 //     to a listed payee, in a listed currency, within the per-payment limit and within
 //     what is left of the total budget
@@ -32,7 +33,7 @@ export type JudgeMission = {
   bot_identifier: string;
   objective: string | null;
   limits: Limits;
-  status: "pending" | "approved" | "denied" | "expired";
+  status: "pending" | "approved" | "denied" | "expired" | "revoked";
   expires_at: number;
   spent_usd: number;
   approval_nonce: string; // must come back with the approve/deny form, so other sites cannot submit it
@@ -177,13 +178,18 @@ export class JudgeGateway {
     m.token = this.signToken(m.id);
   }
 
+  private revoke(m: JudgeMission): void {
+    m.status = "revoked";
+    m.token = undefined;
+  }
+
   private async handle(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const url = new URL(req.url ?? "/", "http://judge.local");
     const raw = await readBody(req);
     if (raw === null) return send(res, 413, { error: "BODY_TOO_LARGE" });
 
     // Human side: the approval page (simulated approval, no passkey).
-    const page = url.pathname.match(/^\/authorize\/([0-9a-f-]{36})(?:\/(approve|deny))?$/);
+    const page = url.pathname.match(/^\/authorize\/([0-9a-f-]{36})(?:\/(approve|deny|revoke))?$/);
     if (page) {
       const m = this.mission(page[1]);
       if (!m) return html(res, 404, resultPage("Mission not found", "This mission does not exist."));
@@ -192,6 +198,13 @@ export class JudgeGateway {
         const nonce = new URLSearchParams(raw).get("nonce") ?? "";
         if (!safeEqualHex(Buffer.from(m.approval_nonce).toString("hex"), Buffer.from(nonce).toString("hex"))) {
           return html(res, 403, resultPage("Not allowed", "Open the approval link again and use its buttons."));
+        }
+        // Revoking takes back an approval: the mission token stops working at once, for every
+        // payment not yet decided.
+        if (page[2] === "revoke") {
+          if (m.status !== "approved") return html(res, 409, resultPage(`Mission ${m.status}`, "Only an approved mission can be revoked."));
+          this.revoke(m);
+          return html(res, 200, resultPage("Mission revoked (judge mode)", `${m.bot_identifier} can no longer make payments under this mission.`));
         }
         if (m.status !== "pending") return html(res, 409, resultPage(`Already ${m.status}`, "This mission was already resolved."));
         const approved = page[2] === "approve";

@@ -105,7 +105,7 @@ test("an expired mission is DENY even with a valid token", async () => {
   gw.missions.get(mission.requestId)!.expires_at = clock - 1;
   const r = await checkPayment(token, { payee: "Brightleaf Design Studio", amount_usd: 1, memo: "" });
   assert.equal(r.decision, "DENY");
-  assert.equal(r.reason, "TOKEN_EXPIRED");
+  assert.equal(r.reason, "the mission has expired (TOKEN_EXPIRED)");
   assert.equal((await missionStatus(mission.requestId)).status, "expired");
 });
 
