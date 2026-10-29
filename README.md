@@ -2,6 +2,8 @@
 
 **AI pays your invoices. It cannot be tricked into paying anyone else.**
 
+**▶ Watch it without a key: [yebo-muse-demo-production.up.railway.app](https://yebo-muse-demo-production.up.railway.app)**: replays of three real recorded runs, no model calls, dry run.
+
 Meta's Muse models read your invoices and plan the payments; [Yebo](https://yebo.dev) checks every payment against limits a human approved, so even a fooled AI cannot pay anyone you did not approve.
 
 Built for the **Meta Global AI Developer Hackathon** (Cerebral Valley), Startup Track, Oct 26 to Nov 4, 2026. **Contributors:** Francis Folekani Banda (solo).

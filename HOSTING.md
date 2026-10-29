@@ -1,6 +1,8 @@
 # Hosting plan: a live link for judges (until Nov 16, 2026)
 
-> **Plan only. Nothing is deployed.** No service, variable or key has been created. Francis approves before anything goes up.
+> **Replay mode is deployed (Oct 29, 2026):** https://yebo-muse-demo-production.up.railway.app
+> Railway project `yebo-muse-demo`, separate from Yebo's. One variable: `YEBO_SITE=replay`. No API keys. Live mode is **not** deployed and needs Francis's approval.
+> Deployed from a clean `git archive` of `main` with `railway up`. `railway.json` and `.nvmrc` pin the build (`npm ci --include=dev`, `npm start`, Node 22).
 
 The goal is one link judges can open without cloning the repo or bringing a key, kept up until **Nov 16, 2026**, and then switched off.
 
@@ -50,10 +52,10 @@ Both modes are always **judge mode** and **dry run**: payments are checked by th
 
 Prices checked on Oct 27, 2026: dev.meta.ai/docs/pricing-rate-limits, baseten.co/pricing, render.com/docs/free, docs.railway.com/reference/pricing/plans. Neither Meta's nor Baseten's pricing page mentions a spending limit, which is why the app enforces its own.
 
-## Steps (for when you approve; not done)
+## Steps (replay: done Oct 29; live: not done)
 
 1. Create the service from the GitHub repo `Unclefole/yebo-muse-agent`, branch `main`.
-2. Build: `npm ci --include=dev` (the server runs through `tsx`, a dev dependency). Start: `npm run web`. Node 22.
+2. Build: `npm ci --include=dev` (the server runs through `tsx`, a dev dependency). Start: `npm start` (`npm run web`). Node 22. `railway.json` and `.nvmrc` set these.
 3. Variables for replay: `YEBO_SITE=replay`. That's all; no keys.
 4. Variables for live (later): `YEBO_SITE=live`, `YEBO_TRUST_PROXY=true`, `YEBO_LIVE_DAILY_USD=2`, `YEBO_LIVE_SPEND_FILE=/data/live-spend.json`, `YEBO_TODAY=2026-11-02` (so "this week" matches the demo), and a **new, demo-only** `META_API_KEY` (optional `BASETEN_API_KEY` for Open mode). Never `YEBO_HMAC_SECRET`, never `YEBO_EXECUTION_LIVE`. The hosted mode ignores the HMAC secret and always runs judge mode, but it should not be on the host at all.
 5. Open the link: the badge reads *Replays · no API calls* (or *Hosted demo · judge mode*), and the footer says it is a hosted demo, dry run.
