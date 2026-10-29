@@ -314,3 +314,8 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 ## 2026-10-29 (problem statement chosen)
 
 - Problem statement decided: **Build for Your World**. `SUBMISSION.md` no longer lists it as an open choice.
+
+## 2026-10-29 (bonus prizes checked against the official guide)
+
+- Read the official participant guide (Cerebral Valley, section 9, bonus prizes from Meta, $50K in total). `SUBMISSION.md` now uses its wording and amounts. We enter Best Build on Meta Open Weight Models, Best Agentic Use-Case, Community Vote and, if posted, Most Viral Project. Best Creative Build is not entered (no Muse Image or Muse Wonder). The guide does not say whether bonus and track prizes can be combined.
+- **Model ID:** the guide says to use `meta-models/muse-spark-open-1026` on Baseten. Re-checked with `npm run check-open`: still 404, and Baseten lists only `meta-models/muse-spark-open` for this account, which answered in 1.8 s. The default stays `meta-models/muse-spark-open`; `MUSE_SPARK_OPEN_MODEL` switches it without a code change.
