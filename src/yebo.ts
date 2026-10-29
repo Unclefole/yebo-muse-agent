@@ -129,14 +129,31 @@ export async function waitForApproval(mission: Mission, pollMs = 3_000): Promise
   return null;
 }
 
-export async function checkPayment(missionToken: string, proposal: PaymentProposal) {
+// What a payment's outcome is when the request reached Yebo (or may have) but no answer came
+// back. Yebo may have allowed it, so it is not retried and is counted as spent.
+export const UNKNOWN_OUTCOME = "outcome unknown (no answer from Yebo)";
+
+export async function checkPayment(missionToken: string, proposal: PaymentProposal): Promise<{
+  status: number; decision: Decision; outcome: string; reason?: string; receipt?: string; raw: any; unknown?: true;
+}> {
   if (!missionToken) {
     return { status: 0, decision: "REQUIRE_APPROVAL" as Decision, outcome: "waiting for approval", reason: "no approved mission", raw: {} };
   }
-  const { status, data } = await call("POST", "/execute", {
-    token: missionToken,
-    action: { capability: PAYMENT_CAPABILITY, amount: proposal.amount_usd, merchant: proposal.payee, asset: CURRENCY },
-  });
+  let reply: { status: number; data: any };
+  try {
+    reply = await call("POST", "/execute", {
+      token: missionToken,
+      action: { capability: PAYMENT_CAPABILITY, amount: proposal.amount_usd, merchant: proposal.payee, asset: CURRENCY },
+    });
+  } catch (err) {
+    // The answer was lost (connection dropped or timed out). Yebo may still have allowed the
+    // payment, so it is treated as denied here, never retried, and counted against limits.
+    return {
+      status: 0, decision: "DENY", outcome: UNKNOWN_OUTCOME, unknown: true, raw: {},
+      reason: `no answer from Yebo (${err instanceof Error ? err.message : String(err)}); it may have been allowed, so it is not retried: check Yebo's receipts before paying it again`,
+    };
+  }
+  const { status, data } = reply;
   // Fail closed: anything we cannot read as an allowed, executed payment is a DENY.
   const allowed = status === 200 && data?.decision === "allow" && data?.executed === true;
   const reference = String(data?.external_reference ?? "");
