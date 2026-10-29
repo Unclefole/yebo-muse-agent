@@ -58,7 +58,7 @@ AI agents are starting to pay bills, and an invoice is a document anyone can wri
 ## Track and problem statement
 
 - **Track:** Startup track (judged on technical execution and whether it holds up in production).
-- **Problem statement:** **Build for Your World**: Yebo's own domain is authorizing payments made by AI agents, and this brings Meta's models to that domain. It could also be argued under **Push the Frontier** (safe autonomy for AI agents that move money), but "Build for Your World" is the closer fit. **Your call.**
+- **Problem statement:** **Build for Your World**: Yebo's own domain is authorizing payments made by AI agents, and this brings Meta's models to that domain.
 
 ## Meta models and how they are used
 
