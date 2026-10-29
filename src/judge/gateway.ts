@@ -5,7 +5,9 @@
 //
 // Rules, all fail-closed (anything unexpected is refused):
 //   - every API call is signed: hex HMAC-SHA256 over `${ts}.${METHOD}.${path}.${body}`,
-//     timestamp within 5 minutes
+//     timestamp within 5 minutes; a body that names a key twice is refused
+//   - a payment carries only capability, amount, payee and currency; any other field
+//     (recurring, fee, order or idempotency key) is refused, never silently ignored
 //   - a mission must carry enforceable limits: capabilities, per-payment limit, total
 //     budget, and for payments a non-empty payee list and currency list
 //   - a mission lasts 1 to 60 minutes and needs a human approval before anything runs; the
@@ -19,6 +21,7 @@ import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypt
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { approvalPage, resultPage } from "./pages.js";
+import { DuplicateKeyError, parseStrict } from "../json.js";
 
 export type Limits = {
   capabilities: string[];
@@ -53,6 +56,8 @@ const TTL_MIN_MS = 60_000;
 const TTL_MAX_MS = 60 * 60_000;
 const TTL_DEFAULT_MS = 10 * 60_000;
 const MAX_BODY_BYTES = 64 * 1024;
+const EXECUTE_FIELDS = new Set(["token", "action"]);
+const ACTION_FIELDS = new Set(["capability", "amount", "merchant", "asset"]);
 
 const isPayment = (capability: string) => /^payment(\.|$)/i.test(capability);
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string" && x.length > 0);
@@ -225,8 +230,9 @@ export class JudgeGateway {
     let body: Record<string, unknown> = {};
     if (raw.length) {
       try {
-        body = JSON.parse(raw);
-      } catch {
+        body = parseStrict(raw) as Record<string, unknown>;
+      } catch (err) {
+        if (err instanceof DuplicateKeyError) return send(res, 400, { error: "DUPLICATE_KEY", message: err.message });
         return send(res, 400, { error: "BAD_JSON" });
       }
       if (typeof body !== "object" || body === null || Array.isArray(body)) return send(res, 400, { error: "BAD_REQUEST" });
@@ -288,6 +294,10 @@ export class JudgeGateway {
     if (typeof body.token !== "string" || !action || typeof action !== "object") {
       return send(res, 400, { error: "BAD_REQUEST", message: "token + action required" });
     }
+    // Only the fields the gateway enforces. Anything else (recurring, a fee, an order or
+    // idempotency key, a note) would look like a promise the gateway does not keep.
+    const extra = [...Object.keys(body).filter((k) => !EXECUTE_FIELDS.has(k)), ...Object.keys(action).filter((k) => !ACTION_FIELDS.has(k)).map((k) => `action.${k}`)];
+    if (extra.length) return send(res, 400, { error: "UNKNOWN_FIELD", message: `not supported: ${extra.join(", ")}` });
     const missionId = this.tokenMission(body.token);
     if (!missionId) return send(res, 401, { error: "TOKEN_INVALID" });
     const m = this.mission(missionId);

@@ -4,7 +4,8 @@
 //
 //   duplicates      always on: a second invoice with the same payee and invoice number
 //                   (look-alike letters count as the real ones); an invoice number with a
-//                   hidden character or mixed scripts is refused as tampered
+//                   hidden character or mixed scripts is refused as tampered; copies of one
+//                   invoice with different totals are all refused
 //   vendor file     on by default (demo/vendors.json; YEBO_VENDORS=path/to/file to use
 //                   another, YEBO_VENDORS=off to turn it off): the payee must be on the
 //                   vendor file, and every account number in the invoice's payment details
@@ -163,15 +164,31 @@ export function checkInvoices(
   const rejected: Rejection[] = [];
   const seen = new Map<string, Invoice>();
   const paid = new Map<string, number>(); // per vendor, in this run, for the caps
+  const keyOf = (inv: Invoice) => (inv.invoice_number ? `${norm(inv.payee)}|${invoiceKey(inv.invoice_number)}` : null);
+  // Copies of one invoice that disagree on the amount: none of them is paid, since there is
+  // no telling which total is right (the first one read is not trusted over the others).
+  const byKey = new Map<string, Invoice[]>();
   for (const inv of invoices) {
-    const key = inv.invoice_number ? `${norm(inv.payee)}|${invoiceKey(inv.invoice_number)}` : null;
+    const key = keyOf(inv);
+    if (key) byKey.set(key, [...(byKey.get(key) ?? []), inv]);
+  }
+  const conflict = (key: string | null) => {
+    const copies = key ? byKey.get(key) ?? [] : [];
+    if (new Set(copies.map((c) => `${c.currency}|${Math.round(c.amount * 100)}`)).size < 2) return null;
+    return `conflicting totals for invoice ${copies[0].invoice_number}: ${copies.map((c) => `${c.currency} ${c.amount} in ${c.file}`).join(", ")}`;
+  };
+  for (const inv of invoices) {
+    const key = keyOf(inv);
     const first = key ? seen.get(key) : undefined;
     const tampered = referenceRefusal(inv.invoice_number);
+    const conflicting = conflict(key);
     let refusal: { control: Control; reason: string } | null = tampered
       ? { control: "reference", reason: first ? `${tampered}; it matches invoice ${first.invoice_number} in ${first.file}` : tampered }
-      : first
-        ? { control: "duplicate", reason: `duplicate of invoice ${first.invoice_number} in ${first.file}` }
-        : null;
+      : conflicting
+        ? { control: "duplicate", reason: conflicting }
+        : first
+          ? { control: "duplicate", reason: `duplicate of invoice ${first.invoice_number} in ${first.file}` }
+          : null;
     if (!refusal && vendors) refusal = vendorMismatch(inv, vendors);
     const vendor = vendors ? vendorFor(inv.payee, vendors) : undefined;
     const before = vendor ? paid.get(vendor.name) ?? 0 : 0;
