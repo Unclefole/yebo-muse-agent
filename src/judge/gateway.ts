@@ -115,8 +115,12 @@ export function paymentRefusal(m: JudgeMission, action: Record<string, unknown>)
   return null;
 }
 
+// One allowed payment (a dry run), for tests that count what was allowed.
+export type JudgeExecution = { mission_id: string; merchant: string; amount: number; asset: string; receipt_id: string };
+
 export class JudgeGateway {
   readonly missions = new Map<string, JudgeMission>();
+  readonly executions: JudgeExecution[] = [];
   private server?: Server;
   private readonly tokenKey = randomBytes(32); // signs mission tokens; never leaves this process
   private readonly now: () => number;
@@ -284,6 +288,8 @@ export class JudgeGateway {
     const amount = (action as { amount: number }).amount;
     m.spent_usd = Math.round((m.spent_usd + amount) * 100) / 100;
     const receiptId = `rcpt_${randomUUID()}`;
+    const { merchant, asset } = action as { merchant: string; asset: string };
+    this.executions.push({ mission_id: m.id, merchant, amount, asset, receipt_id: receiptId });
     send(res, 200, {
       ok: true,
       decision: "allow",

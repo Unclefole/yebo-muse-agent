@@ -211,7 +211,7 @@ npm run extract -- demo/invoices                # only read the invoices and pri
 npm run check-open                              # check the Muse Spark Open (Baseten) setup
 npm run ledger                                  # what each vendor used in the last 24 hours (npm run ledger -- reset)
 npm run replay -- save <recording.json> <id> "<title>" "<summary>"   # keep a recorded run as a replay (see below)
-npm test                                        # 89 tests, no API calls
+npm test                                        # 102 tests, no API calls
 ```
 
 **Pin the date for a repeatable demo:** `YEBO_TODAY=2026-11-02` (a Monday; Brightleaf, Copperline and Ridgeback are due that week, so "pay this week's invoices" selects those three).
@@ -238,8 +238,9 @@ Everything in this repository was built between Oct 26 and Nov 4, 2026. [HACKATH
 - The vendor file (payees, bank accounts and optional caps, on by default) and the duplicate check, with four labelled test invoices
 - The one-click demo set (the 5 samples plus 2 test invoices)
 - The 24-hour vendor limit and its ledger, inactive vendors, and the Controls Lab (six preset scenarios, with ten labelled Juniper test invoices)
+- Adversarial payment tests (`test/adversarial.test.ts`, `docs/ADVERSARIAL_TESTS.md`): each attack run through a scripted compromised agent and directly against the gateway
 - Replays of real recorded runs, and the hosted-demo mode (replay site, and live runs behind a per-visitor limit, a daily spend cap and an off switch; not deployed)
-- Five fictional sample invoices and their generator, the sample voice command, and 89 tests
+- Five fictional sample invoices and their generator, the sample voice command, and 102 tests
 
 **Pre-existing, not part of this submission:** the **Yebo authorization gateway** (`gateway.yebo.dev`) and the **yebo.dev approval page**. This project calls the gateway over the network the same way any customer would; its source is not in this repository. To support this project during the hackathon, small changes were made in the private Yebo repository (an agent-only key that can never approve missions, the approval page taking the approver from the signed-in account, and showing the requesting agent's name and limits); those are not part of this submission either. Judge mode lets you run everything here without them.
 
@@ -249,12 +250,16 @@ Everything in this repository was built between Oct 26 and Nov 4, 2026. [HACKATH
 - **Fail closed everywhere.** Missing limits, a forged or expired mission token, an unknown payee, a malformed model answer, an unsigned request: all refused. The judge gateway requires an HMAC signature on every call, and its approve button needs a per-mission nonce.
 - **Untrusted input stays data.** Invoice text is never followed. Model tool arguments are validated before they reach the gateway. The web page writes all text with `textContent`, serves a strict Content-Security-Policy with no inline scripts, accepts same-origin uploads only, and binds to 127.0.0.1 (the hosted-demo mode, `YEBO_SITE`, binds to the host's port and accepts no uploads).
 - **No new dependencies.** The web server is Node's built-in `http`; the page is plain HTML, CSS and JavaScript; audio is converted in the browser. Runtime dependency: `dotenv`.
-- **Tested.** `npm test` runs 89 tests with the Meta API mocked: gateway rules, invoice reading and validation, planning before approval and repeated proposals, the attack demo, the demo set, the duplicate, vendor, cap, 24-hour and inactive-vendor checks, the vendor ledger across runs, every Controls Lab scenario, payments sent at the same instant, voice, the web app's event stream, Muse Spark Open routing (which model reads what, voice, no structured output sent), replays, and the hosted demo's limits (per visitor, daily spend cap with reserves, concurrency, off switch).
+- **Tested.** `npm test` runs 102 tests with the Meta API mocked: gateway rules, adversarial payment attacks (repeats under new keys, 20 copies at once, a lost answer then a retry, a changed payee or account, a provider tool call), each through a compromised agent and straight at the gateway, invoice reading and validation, planning before approval and repeated proposals, the attack demo, the demo set, the duplicate, vendor, cap, 24-hour and inactive-vendor checks, the vendor ledger across runs, every Controls Lab scenario, payments sent at the same instant, voice, the web app's event stream, Muse Spark Open routing (which model reads what, voice, no structured output sent), replays, and the hosted demo's limits (per visitor, daily spend cap with reserves, concurrency, off switch).
 
 ## Known limitations
 
 - **Dry run only.** No real money moves, in either mode.
-- **Judge mode is a stand-in.** Its receipts are local IDs, approval is a button, and its denial reasons list every rule broken (the real gateway reports the first one).
+- **Approval is a cap, not one exact order.** Yebo's gateway sees the payee, the amount, the currency and the budget left, not the order or invoice number. Within one approved mission, payments to an approved payee are allowed until the per-payment limit or the budget stops them. Which invoice a payment is for is checked in this repo's code (one payment per invoice, repeated invoice numbers refused) before the limits are built. Details: `docs/ADVERSARIAL_TESTS.md`.
+- **No idempotency keys.** A repeated payment is stopped by the budget, not recognised as the same order. A second mission for the same order needs a new human approval; if a human approves it, it can pay again. Across runs, only vendors with a `max_24h_usd` limit are remembered.
+- **A lost answer is not reconciled automatically.** If Yebo's answer to a payment never arrives, the payment is reported as "outcome unknown", not retried, and counted against the vendor's 24-hour limit; check Yebo's receipts before paying it again. This client does not look the receipt up itself.
+- **A reused mission token skips the invoice checks.** With `YEBO_MISSION_TOKEN` set, the vendor file and duplicate checks do not run (nothing new is approved); only the gateway's limits apply.
+- **Judge mode is a stand-in.** Its receipts are local IDs, approval is a button with no passkey (so the process running it could approve its own mission; the live gateway's agent key cannot approve), and its denial reasons list every rule broken (the real gateway reports the first one).
 - **The attack demo forces the hidden requests through** because the Muse Spark models refused them in every test; it shows what happens if an agent is fully compromised.
 - **USD only.** Invoices in other currencies are read but not paid.
 - **The vendor file is on by default** (`YEBO_VENDORS=off` turns it off) and matches account numbers by their last 4 digits. Yebo enforces the payee; the account is checked in code before the limits are built, because Yebo never sees it. If Muse reads an invoice without its account number, it is read once more; if the account is still missing, the invoice is refused. Any other 4-digit-or-longer number in the payment details (a phone number, say) counts as an unknown account and the invoice is refused: it fails closed. Duplicates are caught by repeated invoice numbers; a bill resent under a new number is caught only if its vendor has a `max_per_run_usd` cap.
