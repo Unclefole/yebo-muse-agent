@@ -310,3 +310,7 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 
 - The demo video, https://youtu.be/QfSVHJDowAU, is linked at the top of the README and `SUBMISSION.md`, in the README's Demo video section and in `SUBMISSION.md`'s Links.
 - Lines that still called the hosted replay demo "not deployed" now link it. Live runs remain not deployed.
+
+## 2026-10-29 (problem statement chosen)
+
+- Problem statement decided: **Build for Your World**. `SUBMISSION.md` no longer lists it as an open choice.
