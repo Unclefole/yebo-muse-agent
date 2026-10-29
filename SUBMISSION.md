@@ -92,12 +92,15 @@ Every model name and API shape was checked against dev.meta.ai (and docs.baseten
 
 ## Bonus prizes we are entering
 
-- **Best Open Weight:** Open mode runs voice, invoice image reading, the hidden payment request check and planning on Muse Spark Open via Baseten, and the app says plainly which steps are not open weights (PDF reading). Muse Spark Open flagged both hidden payment requests in every run.
-- **Best Agentic:** the agent plans multi-step payments with tool calls, and a separate trusted layer (the vendor file, human-approved limits, and Yebo on every payment) keeps a fooled or hijacked agent from paying anyone else.
-- **Most Viral:** a one-click demo and a simple story: "AI can be fooled. The payment can't." (post drafts in `X_POSTS.md`, not posted).
-- **Community Vote:** the same one-click demo, and replays of real runs that need no key.
+Checked against the official participant guide (Cerebral Valley, section 9) on Oct 29, 2026. The guide does not say whether a bonus prize can be combined with a track prize.
 
-Eligibility and whether prizes can be combined follow the official rules.
+- **Best Build on Meta Open Weight Models ($10,000):** for projects built on Muse Glimmer or Muse Spark Open, on the team's own hardware or partner-provided inference. Projects are flagged in the first judging round, and the infrastructure partner checks that they run on an eligible Meta open-weight model. Yebo's Open mode runs voice, invoice image reading, the hidden payment request check and planning on Muse Spark Open via Baseten, a partner. The app says plainly which step is not open weights (PDF reading). Muse Spark Open flagged both hidden payment requests in every run.
+  - **Model ID:** the guide says to use `meta-models/muse-spark-open-1026` on Baseten. On Oct 27 and again on Oct 29 (`npm run check-open`), Baseten answered 404 for that ID ("please check the model you provided"), and listed only `meta-models/muse-spark-open` for this account. So the app uses `meta-models/muse-spark-open`. If `-1026` starts working, set `MUSE_SPARK_OPEN_MODEL=meta-models/muse-spark-open-1026`; no code change is needed.
+- **Best Agentic Use-Case ($5,000):** judged on autonomy, how well the project completes its task, and practical usefulness. The agent plans multi-step payments with tool calls. A separate trusted layer keeps a fooled or hijacked agent from paying anyone else: the vendor file, human-approved limits, and Yebo on every payment.
+- **Community Vote ($10,000):** the most votes in the public gallery, one vote per verified account. Voting opens Nov 9 and the winner is announced Nov 16. Judges and voters get the hosted replays (no key) and the one-click demo.
+- **Most Viral Project ($20,000):** total X engagement (likes, reposts, comments) on the demo post until Nov 8 end of day. **To enter, post the demo on X yourself and submit the post link through the hackathon platform.** Drafts are in `X_POSTS.md`; nothing has been posted.
+
+Not entered: **Best Creative Build** (needs Muse Image or Muse Wonder, which this project does not use).
 
 ## Deadline
 
