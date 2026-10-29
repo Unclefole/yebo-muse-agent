@@ -75,7 +75,7 @@ Every model name and API shape was checked against dev.meta.ai (and docs.baseten
 - Judge mode: a local stand-in for the Yebo gateway with a simulated approval page
 - The web app with the live decision timeline and the one-click demo set
 - Replays of real recorded runs, and a hosted-demo mode with strict limits (not deployed; see `HOSTING.md`)
-- Sample and test invoices, 127 tests (including adversarial payment tests), and a dated log of every change (`HACKATHON_LOG.md`)
+- Sample and test invoices, 143 tests (including 18 adversarial payment tests), and a dated log of every change (`HACKATHON_LOG.md`)
 
 **Pre-existing, not part of this submission:** the Yebo authorization gateway (`gateway.yebo.dev`) and the yebo.dev passkey approval page. The project calls the gateway over the network like any customer; its source is not in the repository. Small supporting changes were made to it during the hackathon (an agent-only key that can never approve missions, the approval page taking the approver from the signed-in account, and showing the agent's name and limits); those are not part of the submission either. Judge mode runs everything without them.
 

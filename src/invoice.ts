@@ -8,6 +8,7 @@
 import { readFile } from "node:fs/promises";
 import { basename, extname } from "node:path";
 import { structured, type Brain, type ContentPart, type JsonSchemaFormat } from "./muse.js";
+import { DuplicateKeyError, parseStrict } from "./json.js";
 
 export type Invoice = {
   file: string; // where it came from (file name only)
@@ -146,14 +147,16 @@ export function cleanPayee(raw: string, paymentDetails: string | null): string |
 }
 
 // The JSON object in a model answer. Structured output should be bare JSON, but some
-// models wrap it in a code fence or a sentence; take the outermost {...} if so.
+// models wrap it in a code fence or a sentence; take the outermost {...} if so. An answer
+// that names a field twice (two amounts, say) throws DuplicateKeyError.
 function jsonObject(text: string): Record<string, unknown> | null {
   const candidates = [text, text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1)];
   for (const c of candidates) {
     try {
-      const v = JSON.parse(c);
-      if (v && typeof v === "object" && !Array.isArray(v)) return v;
-    } catch {
+      const v = parseStrict(c);
+      if (v && typeof v === "object" && !Array.isArray(v)) return v as Record<string, unknown>;
+    } catch (err) {
+      if (err instanceof DuplicateKeyError) throw err;
       // try the next candidate
     }
   }
@@ -162,7 +165,12 @@ function jsonObject(text: string): Record<string, unknown> | null {
 
 // Validates the model's JSON. Throws on anything that is not a usable invoice.
 export function parseInvoice(file: string, json: string): Invoice {
-  const raw = jsonObject(json);
+  let raw: Record<string, unknown> | null;
+  try {
+    raw = jsonObject(json);
+  } catch (err) {
+    throw new Error(`${file}: the reading is ambiguous: ${err instanceof Error ? err.message : err}`);
+  }
   if (!raw) throw new Error(`${file}: the model did not return JSON`);
   const paymentDetails = stringOrNull(raw.payment_details);
   const rawPayee = stringOrNull(raw.payee);

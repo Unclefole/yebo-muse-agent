@@ -23,6 +23,7 @@ import { findHiddenRequests, type HiddenRequest } from "./injection.js";
 import { accountEndings, capRefusal, checkInvoices, loadVendors, vendorFor, vendorName, vendorRefusal, type Rejection, type Vendor } from "./vendors.js";
 import { DAY_MS, fileLedger, type Ledger } from "./ledger.js";
 import type { GatewayMode } from "./gatewayMode.js";
+import { parseStrict } from "./json.js";
 
 const MISSION_TTL_MS = 15 * 60_000;
 const MAX_STEPS = 8;
@@ -159,10 +160,10 @@ export function today(): string {
 const weekday = (iso: string) => new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-US", { weekday: "long", timeZone: "UTC" });
 
 // Model tool arguments are untrusted JSON. Anything that is not a well-formed proposal is
-// refused here and never reaches Yebo.
+// refused here and never reaches Yebo, including arguments that name a field twice.
 export function parseProposal(args: string): PaymentProposal | null {
   try {
-    const p = JSON.parse(args);
+    const p = parseStrict(args) as any;
     if (typeof p?.payee !== "string" || !p.payee.trim()) return null;
     if (typeof p.amount_usd !== "number" || !Number.isFinite(p.amount_usd) || p.amount_usd <= 0) return null;
     return { payee: p.payee.trim(), amount_usd: Math.round(p.amount_usd * 100) / 100, memo: typeof p.memo === "string" ? p.memo : "" };
