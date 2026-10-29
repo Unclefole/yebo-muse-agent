@@ -578,6 +578,7 @@ function showTotals(results) {
 // Each payment that did not go through, with the check in the agent's code that left its
 // invoice out of the limits (if one did) and Yebo's decision. Identical rows are grouped.
 const CONTROL = {
+  reference: "Duplicate check: tampered invoice number",
   duplicate: "Duplicate check",
   unknown_vendor: "Vendor file: payee not on file",
   inactive: "Vendor file: inactive vendor",
