@@ -297,3 +297,11 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
   - Phone (390 px), headless Chrome: layout fits with no horizontal scroll; the voice replay started playing. The full decision counts at phone width were not confirmed: two later runs failed on this machine's network (`ERR_NETWORK_CHANGED`, a load timeout).
 - **Staging gateway found (read-only):** the `yebo-gateway` project's staging environment serves `yebo-gateway-staging.up.railway.app`; production serves `gateway.yebo.dev`. Nothing in that project was changed.
 - README and `SUBMISSION.md` link the demo at the top; `HOSTING.md` says replay is deployed and live is not.
+
+## 2026-10-29 (production dry-run proof)
+
+- **Dry run confirmed first (read-only):** production (`gateway.yebo.dev`) does not have `YEBO_EXECUTION_LIVE` set, so it executes in dry run. Nothing on production was changed. No money moved.
+- **One mission:** the sample Brightleaf Design Studio invoice (INV-1042, $400, fictional), run with `npm run dev` in live mode. Limits: 1 payee, $400 each, $400 in total. An earlier mission for the same invoice expired unapproved after 15 minutes; nothing ran.
+- **Approved with Touch ID** on yebo.dev/authorize (mission `1b58a4d4…`). Yebo answered **ALLOW** (dry run), receipt `rcpt_1cb6b1df…`.
+- **Receipt verified offline:** the gateway's evidence bundle for that payment, checked with `npx yebo-verify@0.2.0 bundle bundle.json --gateway-key gateway-key.pem` (the gateway's published public key). Result PASS, exit code 0. Every check passed: bundle structure, gateway key, per-artifact digests, manifest root hash, manifest signature, execution receipt, mission approval structure, hardware-bound approval (the passkey signed this exact mission scope) and execution inside the approved scope.
+- Full mission, mandate and receipt IDs are kept out of this repo on purpose.
