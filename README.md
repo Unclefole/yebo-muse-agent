@@ -2,6 +2,8 @@
 
 **AI pays your invoices. It cannot be tricked into paying anyone else.**
 
+**▶ Demo video (3 min): [youtu.be/QfSVHJDowAU](https://youtu.be/QfSVHJDowAU)**
+
 **▶ Watch it without a key: [yebo-muse-demo-production.up.railway.app](https://yebo-muse-demo-production.up.railway.app)**: replays of three real recorded runs, no model calls, dry run.
 
 Meta's Muse models read your invoices and plan the payments; [Yebo](https://yebo.dev) checks every payment against limits a human approved, so even a fooled AI cannot pay anyone you did not approve.
@@ -49,7 +51,7 @@ Meta's own Muse Spark safety report says the model can be fooled by prompt injec
 
 ## Watch it without a key: replays
 
-The web app can play back **real recorded runs**, event for event, with no model calls and no cost: the 7-invoice catches, the split invoices, and a voice + Muse Spark Open run. Locally: `npm run web`, then open http://127.0.0.1:3000/?replays. Each replay is labelled as a replay of a real run, with its recording date. A hosted link for judges is planned (see [HOSTING.md](./HOSTING.md)); it is **not deployed yet**.
+The web app can play back **real recorded runs**, event for event, with no model calls and no cost: the 7-invoice catches, the split invoices, and a voice + Muse Spark Open run. Locally: `npm run web`, then open http://127.0.0.1:3000/?replays. Each replay is labelled as a replay of a real run, with its recording date. Hosted for judges, replays only: https://yebo-muse-demo-production.up.railway.app (see [HOSTING.md](./HOSTING.md)).
 
 ## The 30-second pitch
 
@@ -241,7 +243,7 @@ Everything in this repository was built between Oct 26 and Nov 4, 2026. [HACKATH
 - The one-click demo set (the 5 samples plus 2 test invoices)
 - The 24-hour vendor limit and its ledger, inactive vendors, and the Controls Lab (six preset scenarios, with ten labelled Juniper test invoices)
 - Adversarial payment tests (`test/adversarial.test.ts`, `docs/ADVERSARIAL_TESTS.md`): each attack run through a scripted compromised agent and directly against the gateway
-- Replays of real recorded runs, and the hosted-demo mode (replay site, and live runs behind a per-visitor limit, a daily spend cap and an off switch; not deployed)
+- Replays of real recorded runs, and the hosted-demo mode (replay site, and live runs behind a per-visitor limit, a daily spend cap and an off switch; the replay site is deployed, live runs are not)
 - Five fictional sample invoices and their generator, the sample voice command, and 143 tests
 
 **Pre-existing, not part of this submission:** the **Yebo authorization gateway** (`gateway.yebo.dev`) and the **yebo.dev approval page**. This project calls the gateway over the network the same way any customer would; its source is not in this repository. To support this project during the hackathon, small changes were made in the private Yebo repository (an agent-only key that can never approve missions, the approval page taking the approver from the signed-in account, and showing the requesting agent's name and limits); those are not part of this submission either. Judge mode lets you run everything here without them.
@@ -284,7 +286,7 @@ None of this exists yet. The same pattern (the AI proposes, a human approves lim
 
 ## Demo video
 
-The 3-minute demo script is in [DEMO_SCRIPT.md](./DEMO_SCRIPT.md).
+https://youtu.be/QfSVHJDowAU (3 minutes). The script it follows is in [DEMO_SCRIPT.md](./DEMO_SCRIPT.md).
 
 ## License
 

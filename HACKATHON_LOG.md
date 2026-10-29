@@ -305,3 +305,8 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - **Approved with Touch ID** on yebo.dev/authorize (mission `1b58a4d4…`). Yebo answered **ALLOW** (dry run), receipt `rcpt_1cb6b1df…`.
 - **Receipt verified offline:** the gateway's evidence bundle for that payment, checked with `npx yebo-verify@0.2.0 bundle bundle.json --gateway-key gateway-key.pem` (the gateway's published public key). Result PASS, exit code 0. Every check passed: bundle structure, gateway key, per-artifact digests, manifest root hash, manifest signature, execution receipt, mission approval structure, hardware-bound approval (the passkey signed this exact mission scope) and execution inside the approved scope.
 - Full mission, mandate and receipt IDs are kept out of this repo on purpose.
+
+## 2026-10-29 (demo video link)
+
+- The demo video, https://youtu.be/QfSVHJDowAU, is linked at the top of the README and `SUBMISSION.md`, in the README's Demo video section and in `SUBMISSION.md`'s Links.
+- Lines that still called the hosted replay demo "not deployed" now link it. Live runs remain not deployed.
