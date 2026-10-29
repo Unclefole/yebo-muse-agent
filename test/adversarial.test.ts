@@ -8,6 +8,9 @@
 import { test, before, after, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer as createTcpServer, connect, type Server as TcpServer } from "node:net";
 import type { AddressInfo } from "node:net";
 import { JudgeGateway } from "../src/judge/gateway.js";
@@ -25,7 +28,7 @@ const VENDORS: Vendor[] = [
 ];
 
 type Call = { name?: string; args: Record<string, unknown> };
-type Invoice = typeof ORDER;
+type Invoice = typeof ORDER & { currency?: string };
 
 const realFetch = globalThis.fetch;
 let gw: JudgeGateway;
@@ -35,13 +38,15 @@ let invoices: Invoice[] = [];
 let turns: Call[][] = [];
 let toolsOffered: string[][] = [];
 let reportBodies: any[] = []; // the final report requests (no tools)
+// Runs before a request reaches the gateway (to change something mid-run).
+let onGateway: ((url: string) => Promise<void> | void) | null = null;
 
 function fakeMeta(body: any): unknown {
   const reply = (message: unknown) => ({ choices: [{ message: { role: "assistant", ...(message as object) } }] });
   const schema = body.response_format?.json_schema?.name;
   if (schema === "invoice") {
     const v = invoices.find((i) => JSON.stringify(body.messages).includes(`(${i.file})`))!;
-    return reply({ content: JSON.stringify({ payee: v.payee, amount: v.amount, currency: "USD", due_date: "2026-11-07", invoice_number: v.invoice_number, payment_details: `Fictional Bank, account ending ${v.account}`, notes: null }) });
+    return reply({ content: JSON.stringify({ payee: v.payee, amount: v.amount, currency: v.currency ?? "USD", due_date: "2026-11-07", invoice_number: v.invoice_number, payment_details: `Fictional Bank, account ending ${v.account}`, notes: null }) });
   }
   if (schema === "payment_requests") return reply({ content: JSON.stringify({ requests: [] }) });
   if (!body.tools) {
@@ -66,6 +71,7 @@ before(async () => {
   delete process.env.YEBO_MISSION_TOKEN;
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     if (String(url).startsWith(META)) return new Response(JSON.stringify(fakeMeta(JSON.parse(String(init?.body)))), { status: 200 });
+    if (onGateway) await onGateway(String(url));
     return realFetch(url, init);
   }) as typeof fetch;
   gw = new JudgeGateway({ secret: SECRET, port: 0, autoApprove: true });
@@ -79,6 +85,7 @@ beforeEach(() => {
   turns = [];
   toolsOffered = [];
   reportBodies = [];
+  onGateway = null;
   gw.executions.length = 0;
   process.env.YEBO_GATEWAY_URL = gatewayUrl;
   delete process.env.YEBO_MISSION_TOKEN;
@@ -89,11 +96,14 @@ after(async () => {
   await gw.stop();
 });
 
-async function runWith(opts: { ledger?: MemoryLedger; vendors?: Vendor[] } = {}): Promise<RunEvent[]> {
+async function runWith(opts: { ledger?: MemoryLedger; vendors?: Vendor[] | null; reloadVendors?: () => Vendor[] | null } = {}): Promise<RunEvent[]> {
   const events: RunEvent[] = [];
   const sources = invoices.map((i) => ({ name: i.file, data: Buffer.from("fake") }));
   await runAgent(
-    { goal: "Pay order ORD-1042.", sources, vendors: opts.vendors ?? VENDORS, ...(opts.ledger ? { ledger: opts.ledger } : {}) },
+    {
+      goal: "Pay order ORD-1042.", sources, ...(opts.vendors === null ? {} : { vendors: opts.vendors ?? VENDORS }),
+      ...(opts.ledger ? { ledger: opts.ledger } : {}), ...(opts.reloadVendors ? { reloadVendors: opts.reloadVendors } : {}),
+    },
     { mode: "judge", url: gatewayUrl, stop: async () => {} },
     (e) => events.push(e),
   );
@@ -453,4 +463,190 @@ test("#7 direct: $53.99 is over the per-payment limit and a fee after $49 is ref
   assert.equal((await execute(token, "merchant_A", 4.99, { description: "service fee" })).status, 200);
   assert.equal((await execute(token, "merchant_A", 49)).status, 402);
   assert.deepEqual(moved(), { count: 1, total: 4.99, payees: ["merchant_A"] });
+});
+
+// 9. The vendor's bank account changes after approval: the payment needs a new approval.
+
+const CHANGED: Vendor[] = [{ name: "merchant_A", accounts: ["7310"] }, VENDORS[1]];
+
+test("#9 agent: the vendor file changes during approval; the payment is held back, copies too", async () => {
+  turns = [[pay(49, "ORD-1042"), pay(49, "ORD-1042 again")]];
+  const ev = await runWith({ reloadVendors: () => CHANGED });
+  assert.ok(ev.some((e) => e.type === "mission_result" && e.approved));
+  const d = decisions(ev);
+  assert.deepEqual(d.map((x) => x.decision), ["REQUIRE_APPROVAL", "REQUIRE_APPROVAL"], "neither the invoice nor its copy is sent");
+  assert.match(d[0].reason ?? "", /vendor file changed after approval: account ending 4821 is not on file for merchant_A/);
+  assert.deepEqual(moved(), { count: 0, total: 0, payees: [] });
+});
+
+test("#9 agent: YEBO_VENDORS edited on disk while the mission waits for approval", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "yebo-adv-"));
+  const file = join(dir, "vendors.json");
+  writeFileSync(file, JSON.stringify(VENDORS));
+  process.env.YEBO_VENDORS = file;
+  // The account changes when the agent polls for approval.
+  onGateway = (url) => {
+    if (/\/authorize\/[^/]+\/status$/.test(url)) writeFileSync(file, JSON.stringify(CHANGED));
+  };
+  turns = [[pay(49, "ORD-1042")]];
+  try {
+    const ev = await runWith({ vendors: null });
+    assert.deepEqual(decisions(ev).map((x) => x.decision), ["REQUIRE_APPROVAL"]);
+  } finally {
+    delete process.env.YEBO_VENDORS;
+    rmSync(dir, { recursive: true, force: true });
+  }
+  assert.deepEqual(moved(), { count: 0, total: 0, payees: [] });
+});
+
+test("#9 agent: a vendor file that cannot be read again after approval stops the payment", async () => {
+  turns = [[pay(49, "ORD-1042")]];
+  const ev = await runWith({ reloadVendors: () => { throw new Error("unexpected end of JSON"); } });
+  const [d] = decisions(ev);
+  assert.equal(d.decision, "REQUIRE_APPROVAL");
+  assert.match(d.reason ?? "", /could not be read again/);
+  assert.deepEqual(moved(), { count: 0, total: 0, payees: [] });
+});
+
+test("#9 agent: an unchanged vendor file pays as usual", async () => {
+  turns = [[pay(49, "ORD-1042")]];
+  const ev = await runWith({ reloadVendors: () => VENDORS });
+  assert.deepEqual(decisions(ev).map((x) => x.decision), ["ALLOW"]);
+  assert.deepEqual(moved(), { count: 1, total: 49, payees: ["merchant_A"] });
+});
+
+// 10. Currency changed, or 4900 cents read as $4,900: refused.
+
+test("#10 agent: a EUR invoice is not paid", async () => {
+  invoices = [{ ...ORDER, currency: "EUR" }];
+  turns = [[pay(49, "ORD-1042")]];
+  const ev = await runWith();
+  assert.ok(!ev.some((e) => e.type === "mission"), "only USD invoices build limits");
+  assert.deepEqual(moved(), { count: 0, total: 0, payees: [] });
+});
+
+test("#10 agent: 4900 against the $49 invoice is denied; the $49 is paid", async () => {
+  turns = [[pay(4900, "ORD-1042 (4900 cents)"), pay(49, "ORD-1042")]];
+  const ev = await runWith();
+  assert.deepEqual(decisions(ev).map((d) => [d.proposal.amount_usd, d.decision]), [[49, "ALLOW"], [4900, "DENY"]]);
+  assert.deepEqual(moved(), { count: 1, total: 49, payees: ["merchant_A"] });
+});
+
+test("#10 agent: an invoice misread as $4,900 is refused by the approved $49 mission, or by a vendor cap", async () => {
+  invoices = [{ ...ORDER, amount: 4900 }];
+  turns = [[pay(4900, "ORD-1042")]];
+  process.env.YEBO_MISSION_TOKEN = await approved49();
+  let ev = await runWith();
+  const [d] = decisions(ev);
+  assert.equal(d.decision, "DENY");
+  assert.match(d.reason ?? "", /exceeds the per-payment limit 49/);
+  // With a new approval, a vendor's per-run cap is the backstop for a misread amount.
+  delete process.env.YEBO_MISSION_TOKEN;
+  ev = await runWith({ vendors: [{ ...VENDORS[0], max_per_run_usd: 100 }, VENDORS[1]] });
+  const refused = ev.find((e) => e.type === "invoices_refused");
+  assert.ok(refused?.type === "invoices_refused" && refused.rejected[0].control === "per_run");
+  assert.deepEqual(moved(), { count: 0, total: 0, payees: [] });
+});
+
+test("#10 direct: another currency, cents as dollars, or a malformed amount are refused", async () => {
+  const token = await approved49();
+  const action = (extra: Record<string, unknown>) => signed("POST", "/execute", { token, action: { capability: "payment", merchant: "merchant_A", amount: 49, asset: "USD", ...extra } });
+  for (const [extra, status] of [
+    [{ asset: "EUR" }, 403], [{ asset: "usd" }, 403], [{ asset: undefined }, 403],
+    [{ amount: 4900 }, 403], [{ amount: 49.001 }, 403], [{ amount: "49" }, 400], [{ amount: -49 }, 400],
+  ] as const) {
+    assert.equal((await action(extra)).status, status, JSON.stringify(extra));
+  }
+  assert.deepEqual(moved(), { count: 0, total: 0, payees: [] });
+});
+
+// 11. The approval reused for another order, customer or agent.
+
+test("#11 agent: another order gets its own mission and its own approval", async () => {
+  invoices = [{ ...ORDER, file: "ord-2000.png", invoice_number: "ORD-2000" }];
+  turns = [[pay(49, "ORD-2000")]];
+  const before = gw.missions.size;
+  const ev = await runWith();
+  assert.equal(gw.missions.size - before, 1, "a new mission was requested for the new order");
+  assert.ok(ev.some((e) => e.type === "mission"));
+});
+
+test("#11 direct: another agent's key cannot use the token; dead missions' tokens are refused", async () => {
+  const token = await approved49();
+  const body = JSON.stringify({ token, action: { capability: "payment", amount: 49, merchant: "merchant_A", asset: "USD" } });
+  const ts = String(Date.now());
+  const otherKey = createHmac("sha256", "another-agents-secret").update(`${ts}.POST./execute.${body}`).digest("hex");
+  const other = await realFetch(`${gatewayUrl}/api/blacktoven/execute`, { method: "POST", headers: { "content-type": "application/json", "x-blacktoven-ts": ts, "x-blacktoven-signature": otherKey }, body });
+  assert.equal(other.status, 401);
+  // A token for merchant_A's order does not reach merchant_B (also #8).
+  assert.equal((await execute(token, "merchant_B", 49)).status, 403);
+  assert.deepEqual(moved(), { count: 0, total: 0, payees: [] });
+});
+
+test("#11 known limit: the $49 approval for ORD-1042 also fits a $49 payment for another order to merchant_A, until it is used", async () => {
+  const token = await approved49();
+  // The gateway does not know the order: ORD-2000 fits ORD-1042's unused budget.
+  assert.equal((await execute(token, "merchant_A", 49, { order_id: "ORD-2000" })).status, 200);
+  assert.equal((await execute(token, "merchant_A", 49, { order_id: "ORD-1042" })).status, 402);
+  assert.deepEqual(moved(), { count: 1, total: 49, payees: ["merchant_A"] });
+});
+
+// 12. The approval is revoked after the checks and before execution: enforced at execution.
+
+async function revokeOnPage(missionId: string, base = gatewayUrl) {
+  const m = [...gw.missions.values()].find((x) => x.id === missionId)!;
+  return realFetch(`${base}/authorize/${missionId}/revoke`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: `nonce=${m.approval_nonce}` });
+}
+
+test("#12 agent: the human revokes after approval, before the payment is checked", async () => {
+  turns = [[pay(49, "ORD-1042")]];
+  onGateway = async (url) => {
+    if (url.endsWith("/execute") && onGateway) {
+      onGateway = null;
+      const m = [...gw.missions.values()].at(-1)!;
+      assert.equal((await revokeOnPage(m.id)).status, 200);
+    }
+  };
+  const ev = await runWith();
+  const [d] = decisions(ev);
+  assert.equal(d.decision, "DENY");
+  assert.equal(d.reason, "the mission is revoked (TOKEN_NOT_ACTIVE)");
+  assert.deepEqual(moved(), { count: 0, total: 0, payees: [] });
+});
+
+test("#12 direct: a revoked mission's token stops at once; revoking needs the page's nonce", async () => {
+  const token = await approved49();
+  const m = [...gw.missions.values()].at(-1)!;
+  const noNonce = await realFetch(`${gatewayUrl}/authorize/${m.id}/revoke`, { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" }, body: "nonce=" });
+  assert.equal(noNonce.status, 403);
+  assert.equal((await revokeOnPage(m.id)).status, 200);
+  assert.equal((await revokeOnPage(m.id)).status, 409, "already revoked");
+  const r = await execute(token, "merchant_A", 49);
+  assert.equal(r.status, 403);
+  assert.deepEqual(r.data, { error: "TOKEN_NOT_ACTIVE", status: "revoked" });
+  const status = await signed("GET", `/authorize/${m.id}/status`);
+  assert.equal(status.data.status, "revoked");
+  assert.equal(status.data.signedToken, undefined);
+  assert.deepEqual(moved(), { count: 0, total: 0, payees: [] });
+});
+
+test("#12 direct: a mission that expires between approval and execution is refused", async () => {
+  let now = Date.now();
+  const timed = new JudgeGateway({ secret: SECRET, port: 0, autoApprove: true, now: () => now });
+  const url = await timed.start();
+  try {
+    const created = await signed("POST", "/authorize", {
+      bot_identifier: "adversarial-test",
+      mission_scope: { enforceable: { capabilities: ["payment"], per_transaction_limit_usd: 49, cumulative_budget_usd: 49, merchant_scope: ["merchant_A"], asset_scope: ["USD"] } },
+      ttl_ms: 60_000,
+    }, url);
+    const token = (await signed("GET", `/authorize/${created.data.requestId}/status`, undefined, url)).data.signedToken;
+    now += 61_000;
+    const r = await execute(token, "merchant_A", 49, {}, url);
+    assert.equal(r.status, 401);
+    assert.equal(r.data.error, "TOKEN_EXPIRED");
+    assert.equal(timed.executions.length, 0);
+  } finally {
+    await timed.stop();
+  }
 });

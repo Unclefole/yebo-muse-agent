@@ -32,10 +32,19 @@ function shell(title: string, body: string): string {
 }
 
 export function approvalPage(m: JudgeMission & { approval_nonce: string }, now: number): string {
+  const nonceField = `<input type="hidden" name="nonce" value="${esc(m.approval_nonce)}">`;
+  if (m.status === "approved") {
+    return shell("Mission approved (judge mode)", `
+    <p class="kicker">Yebo authorization · judge mode</p>
+    <h1>Approved</h1>
+    <p class="muted">${esc(m.bot_identifier)} can make payments within the approved limits. Revoking stops every payment not yet made.</p>
+    <form method="post" action="/authorize/${esc(m.id)}/revoke">${nonceField}<button class="deny">Revoke approval</button></form>
+    <p><code>${esc(m.id)}</code></p>`);
+  }
   if (m.status !== "pending") return resultPage(`Already ${m.status}`, "This mission was already resolved.");
   const l = m.limits;
   const minutes = Math.max(0, Math.round((m.expires_at - now) / 60_000));
-  const nonce = `<input type="hidden" name="nonce" value="${esc(m.approval_nonce)}">`;
+  const nonce = nonceField;
   return shell("Approve mission (judge mode)", `
     <p class="kicker">Yebo authorization · judge mode</p>
     <p class="banner">Local simulation for judges. The real flow asks for your passkey (Face ID or Touch ID) at yebo.dev. Payments are a dry run: no money moves.</p>
