@@ -290,4 +290,4 @@ https://youtu.be/QfSVHJDowAU (3 minutes). The script it follows is in [DEMO_SCRI
 
 ## License
 
-All rights reserved. The code is public for hackathon judging. For anything else, reach out through [yebo.dev](https://yebo.dev).
+MIT, see [LICENSE](./LICENSE). This covers the code in this repository only. The Yebo gateway it calls (yebo.dev) is a separate, pre-existing product and is not part of this license.

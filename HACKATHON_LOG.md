@@ -323,3 +323,7 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 ## 2026-10-29 (Most Viral X post drafts)
 
 - Added a main post and a reply to `X_POSTS.md` for the Most Viral Project bonus prize, with the demo video, the hosted demo and the repo. Both are under 280 characters as X counts them. Not posted.
+
+## 2026-10-30 (open-source license)
+
+- Added MIT LICENSE (hackathon rules ask for a public, open-source repo). `package.json` now says `"license": "MIT"`, and the README's License section says the license covers this repository's code only; the Yebo gateway (yebo.dev) is a separate, pre-existing product and is not part of it.

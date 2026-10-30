@@ -2,6 +2,7 @@
   "name": "yebo-muse-agent",
   "version": "0.1.0",
   "private": true,
+  "license": "MIT",
   "description": "Yebo AP Agent: Muse Spark reads invoices and proposes payments; Yebo authorizes each one before anything runs.",
   "type": "module",
   "scripts": {
