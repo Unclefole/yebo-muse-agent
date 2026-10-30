@@ -327,3 +327,7 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 ## 2026-10-30 (open-source license)
 
 - Added MIT LICENSE (hackathon rules ask for a public, open-source repo). `package.json` now says `"license": "MIT"`, and the README's License section says the license covers this repository's code only; the Yebo gateway (yebo.dev) is a separate, pre-existing product and is not part of it.
+
+## 2026-10-30 (hosted replay demo redeployed)
+
+- Redeployed the hosted replay demo from a clean `git archive` of `main` at `9f2e5f8` (Add MIT license) with `railway up`. Checked afterwards: the page loads, `/api/config` reports replay mode with dry run on and live runs, uploads and voice off, all 3 replays are listed, and a run request is refused with 403. The only variable is still `YEBO_SITE=replay`, with no keys.
