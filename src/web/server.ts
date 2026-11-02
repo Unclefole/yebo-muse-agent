@@ -12,7 +12,8 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { extname, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { startGateway, type GatewayMode } from "../gatewayMode.js";
+import { exactOrderSetting, startGateway, type GatewayMode } from "../gatewayMode.js";
+import { EXACT_ORDER_LABEL } from "../judge/pages.js";
 import { model, endpoint, onUsage, openAvailable, type Brain } from "../muse.js";
 import { SUPPORTED_EXTENSIONS, type InvoiceSource } from "../invoice.js";
 import { runAgent, today, type AgentMode, type RunEvent } from "../runner.js";
@@ -107,6 +108,7 @@ export class WebApp {
         mode: this.gateway.mode, model: model(), voiceModel: VOICE_MODEL, today: today(), gateway: this.hosted ? "" : this.gateway.url, dryRun: true,
         openAvailable: this.liveRuns && openAvailable(), openModel: endpoint("muse-spark-open").model, openVoiceModel: openVoiceModel(),
         site: this.site, liveRuns: this.liveRuns, uploads: !this.hosted, voice: !this.hosted,
+        exactOrder: exactOrderSetting() ? EXACT_ORDER_LABEL : null,
         live: this.site === "live" && this.guard ? this.guard.status() : null,
       });
     }

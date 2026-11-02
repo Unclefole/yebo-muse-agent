@@ -14,6 +14,7 @@ import { extname, join } from "node:path";
 import { DRY_RUN_OUTCOME } from "./yebo.js";
 import { readInvoiceFile, SUPPORTED_EXTENSIONS } from "./invoice.js";
 import { startGateway, modeBanner } from "./gatewayMode.js";
+import { EXACT_ORDER_LABEL } from "./judge/pages.js";
 import { openVoiceModel, transcribe, transcribeOpen, VOICE_MODEL } from "./voice.js";
 import { readFile } from "node:fs/promises";
 import { readingLine, runAgent, type AgentMode, type RunEvent } from "./runner.js";
@@ -67,6 +68,10 @@ function print(e: RunEvent, mode: "live" | "judge") {
     case "mission": {
       const l = e.limits;
       console.log(`\nLimits ${e.source === "invoices" ? "from the invoices" : "for this plan"}: ${l.payees.length} payees, up to $${l.per_payment_usd} each, $${l.total_usd} in total`);
+      if (e.lines) {
+        console.log(EXACT_ORDER_LABEL);
+        for (const i of e.lines) console.log(`  ${i.invoice_number}: ${i.payee}, account ending ${i.account}, ${i.currency} ${i.amount_usd.toFixed(2)}`);
+      }
       const how = mode === "judge" ? "in your browser (judge mode, simulated approval)" : "with your passkey";
       console.log(`\nApprove these limits ${how}: ${e.authorizeUrl}`);
       if (e.requiredApprovals > 1) console.log(`(needs ${e.requiredApprovals} different approvers)`);

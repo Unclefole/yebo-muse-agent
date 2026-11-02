@@ -6,6 +6,9 @@ import type { JudgeMission } from "./gateway.js";
 const esc = (s: string) =>
   s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 
+// Shown wherever exact-order mode is on. It says what is true today; keep it that way.
+export const EXACT_ORDER_LABEL = "Exact-order mode: enforced by the judge-mode stand-in in this repo. The live Yebo gateway enforces caps today; exact-order is planned there.";
+
 const usd = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function shell(title: string, body: string): string {
@@ -22,6 +25,10 @@ function shell(title: string, body: string): string {
   h1 { font-size:22px; margin:0 0 6px; overflow-wrap:anywhere; }
   .muted { color:var(--muted); font-size:14px; }
   .banner { border:1px solid var(--info); color:var(--info); border-radius:10px; padding:10px 12px; font-size:13px; margin:0 0 18px; }
+  .scroll { overflow-x:auto; margin:12px 0; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { color:var(--muted); font-weight:500; text-align:left; white-space:nowrap; } th, td { padding:6px 8px 6px 0; border-bottom:1px solid var(--line); vertical-align:top; }
+  .nw { white-space:nowrap; } .num { text-align:right; padding-right:0; white-space:nowrap; }
   dl { margin:18px 0; display:grid; grid-template-columns:auto 1fr; gap:8px 16px; font-size:15px; }
   dt { color:var(--muted); } dd { margin:0; text-align:right; overflow-wrap:anywhere; }
   button { width:100%; padding:14px; border-radius:12px; font-size:16px; font-weight:600; cursor:pointer; margin-top:10px; }
@@ -45,6 +52,13 @@ export function approvalPage(m: JudgeMission & { approval_nonce: string }, now: 
   const l = m.limits;
   const minutes = Math.max(0, Math.round((m.expires_at - now) / 60_000));
   const nonce = nonceField;
+  const lines = l.order_lines ?? [];
+  const invoiceList = l.order_lines ? `
+    <p class="banner">${esc(EXACT_ORDER_LABEL)}</p>
+    <div class="scroll"><table><thead><tr><th>Invoice</th><th>Payee</th><th>Account</th><th class="num">Amount</th></tr></thead><tbody>
+    ${lines.map((i) => `<tr><td class="nw">${esc(i.invoice_number)}</td><td>${esc(i.payee)}</td><td class="nw">…${esc(i.account)}</td><td class="num">${usd(i.amount_usd)} ${esc(i.currency)}</td></tr>`).join("")}
+    </tbody></table></div>
+    <p class="muted">Only these ${lines.length} invoice${lines.length === 1 ? "" : "s"} can be paid, each once, for exactly this amount.</p>` : "";
   return shell("Approve mission (judge mode)", `
     <p class="kicker">Yebo authorization · judge mode</p>
     <p class="banner">Local simulation for judges. The real flow asks for your passkey (Face ID or Touch ID) at yebo.dev. Payments are a dry run: no money moves.</p>
@@ -58,8 +72,9 @@ export function approvalPage(m: JudgeMission & { approval_nonce: string }, now: 
       <dt>Can do</dt><dd>${esc(l.capabilities.join(", "))}</dd>
       <dt>Expires</dt><dd>in ${minutes} min</dd>
     </dl>
+    ${invoiceList}
     <p class="muted">Anything outside these limits is refused.</p>
-    <form method="post" action="/authorize/${esc(m.id)}/approve">${nonce}<button class="approve">Approve limits (simulated)</button></form>
+    <form method="post" action="/authorize/${esc(m.id)}/approve">${nonce}<button class="approve">${l.order_lines ? "Approve invoice list (simulated)" : "Approve limits (simulated)"}</button></form>
     <form method="post" action="/authorize/${esc(m.id)}/deny">${nonce}<button class="deny">Deny</button></form>
     <p><code>${esc(m.id)}</code></p>`);
 }

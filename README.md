@@ -215,7 +215,7 @@ npm run extract -- demo/invoices                # only read the invoices and pri
 npm run check-open                              # check the Muse Spark Open (Baseten) setup
 npm run ledger                                  # what each vendor used in the last 24 hours (npm run ledger -- reset)
 npm run replay -- save <recording.json> <id> "<title>" "<summary>"   # keep a recorded run as a replay (see below)
-npm test                                        # 143 tests, no API calls
+npm test                                        # 186 tests, no API calls
 ```
 
 **Pin the date for a repeatable demo:** `YEBO_TODAY=2026-11-02` (a Monday; Brightleaf, Copperline and Ridgeback are due that week, so "pay this week's invoices" selects those three).
@@ -244,7 +244,7 @@ Everything in this repository was built between Oct 26 and Nov 4, 2026. [HACKATH
 - The 24-hour vendor limit and its ledger, inactive vendors, and the Controls Lab (six preset scenarios, with ten labelled Juniper test invoices)
 - Adversarial payment tests (`test/adversarial.test.ts`, `docs/ADVERSARIAL_TESTS.md`): each attack run through a scripted compromised agent and directly against the gateway
 - Replays of real recorded runs, and the hosted-demo mode (replay site, and live runs behind a per-visitor limit, a daily spend cap and an off switch; the replay site is deployed, live runs are not)
-- Five fictional sample invoices and their generator, the sample voice command, and 143 tests
+- Five fictional sample invoices and their generator, the sample voice command, and 186 tests
 
 **Pre-existing, not part of this submission:** the **Yebo authorization gateway** (`gateway.yebo.dev`) and the **yebo.dev approval page**. This project calls the gateway over the network the same way any customer would; its source is not in this repository. To support this project during the hackathon, small changes were made in the private Yebo repository (an agent-only key that can never approve missions, the approval page taking the approver from the signed-in account, and showing the requesting agent's name and limits); those are not part of this submission either. Judge mode lets you run everything here without them.
 
@@ -254,12 +254,23 @@ Everything in this repository was built between Oct 26 and Nov 4, 2026. [HACKATH
 - **Fail closed everywhere.** Missing limits, a forged or expired mission token, an unknown payee, a malformed model answer, a JSON object with a repeated key, an unsigned request, a payment field the gateway does not enforce: all refused. The judge gateway requires an HMAC signature on every call, and its approve button needs a per-mission nonce.
 - **Untrusted input stays data.** Invoice text is never followed. Model tool arguments are validated before they reach the gateway. The web page writes all text with `textContent`, serves a strict Content-Security-Policy with no inline scripts, accepts same-origin uploads only, and binds to 127.0.0.1 (the hosted-demo mode, `YEBO_SITE`, binds to the host's port and accepts no uploads).
 - **No new dependencies.** The web server is Node's built-in `http`; the page is plain HTML, CSS and JavaScript; audio is converted in the browser. Runtime dependency: `dotenv`.
-- **Tested.** `npm test` runs 143 tests with the Meta API mocked: gateway rules, adversarial payment attacks (repeats under new keys or new wording, look-alike invoice numbers, 20 copies at once, a lost answer then a retry, split payments, an added fee, a changed payee or account, an account changed after approval, another currency or cents read as dollars, a reused or revoked approval, recurring fields, an injected consent note, duplicate JSON keys and conflicting totals, a refund claim, checks that are down, a provider tool call), each through a compromised agent and straight at the gateway, invoice reading and validation, planning before approval and repeated proposals, the attack demo, the demo set, the duplicate, vendor, cap, 24-hour and inactive-vendor checks, the vendor ledger across runs, every Controls Lab scenario, payments sent at the same instant, voice, the web app's event stream, Muse Spark Open routing (which model reads what, voice, no structured output sent), replays, and the hosted demo's limits (per visitor, daily spend cap with reserves, concurrency, off switch).
+- **Tested.** `npm test` runs 186 tests with the Meta API mocked: gateway rules, adversarial payment attacks (repeats under new keys or new wording, look-alike invoice numbers, 20 copies at once, a lost answer then a retry, split payments, an added fee, a changed payee or account, an account changed after approval, another currency or cents read as dollars, a reused or revoked approval, recurring fields, an injected consent note, duplicate JSON keys and conflicting totals, a refund claim, checks that are down, a provider tool call), each through a compromised agent and straight at the gateway, invoice reading and validation, planning before approval and repeated proposals, the attack demo, the demo set, the duplicate, vendor, cap, 24-hour and inactive-vendor checks, the vendor ledger across runs, every Controls Lab scenario, payments sent at the same instant, voice, the web app's event stream, Muse Spark Open routing (which model reads what, voice, no structured output sent), replays, and the hosted demo's limits (per visitor, daily spend cap with reserves, concurrency, off switch).
+
+## Exact-order mode (judge mode only)
+
+**Exact-order mode: enforced by the judge-mode stand-in in this repo. The live Yebo gateway enforces caps today; exact-order is planned there.**
+
+Off by default. Turn it on with `YEBO_EXACT_ORDER=on`. It closes the "approval is a cap" gap below for judge-mode runs.
+
+- **The list.** After the invoice checks, the agent's code (not the model) builds one line per invoice: invoice number, payee, account, amount and currency. The plan can only select invoices; it cannot add or change a line. The approval page shows the list.
+- **The rule.** A payment is allowed only if it matches one line exactly, and each line pays once. Anything else is denied: `not an approved invoice`, `amount does not match invoice` or `invoice already paid`. The old cap checks still run, and both must pass.
+- **Fails closed.** An empty or inconsistent list is refused; a mission never falls back to a cap. An invoice with no number, or without exactly one account, is left out. Live mode, a reused `YEBO_MISSION_TOKEN` and a plain instruction with no invoices do not run under this mode.
+- **What it does not fix.** The line's amount is still what Muse Spark read from the invoice. A misread total goes on the list, and only the human reading the list catches it; the vendor file checks the payee and account, not the amount.
 
 ## Known limitations
 
 - **Dry run only.** No real money moves, in either mode.
-- **Approval is a cap, not one exact order.** Yebo's gateway sees the payee, the amount, the currency and the budget left, not the order or invoice number. Within one approved mission, payments to an approved payee are allowed until the per-payment limit or the budget stops them. Which invoice a payment is for is checked in this repo's code (one payment per invoice, repeated invoice numbers refused) before the limits are built. Details: `docs/ADVERSARIAL_TESTS.md`.
+- **Approval is a cap, not one exact order.** (This describes the live Yebo gateway and the default judge mode; see [Exact-order mode](#exact-order-mode-judge-mode-only) for the judge-mode option.) Yebo's gateway sees the payee, the amount, the currency and the budget left, not the order or invoice number. Within one approved mission, payments to an approved payee are allowed until the per-payment limit or the budget stops them. Which invoice a payment is for is checked in this repo's code (one payment per invoice, repeated invoice numbers refused) before the limits are built. Details: `docs/ADVERSARIAL_TESTS.md`.
 - **One order's approval can pay another order to the same payee.** Because the gateway does not know the order, a $49 approval for ORD-1042 also fits a $49 payment marked for ORD-2000 until its budget is used. The real Muse Spark did exactly this when told to reuse an approval (test 11). Payee, total and agent still hold.
 - **One invoice image with two totals.** The reader returns one amount. Two copies of an invoice with different totals are both refused, but a single image showing two totals relies on the reader picking the right one (and on the human reading the limits).
 - **The hidden-request check is a warning.** If it fails, the run goes on without it; the payment rules do not depend on it.

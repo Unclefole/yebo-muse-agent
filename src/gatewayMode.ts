@@ -8,6 +8,14 @@
 import { randomBytes } from "node:crypto";
 import { JudgeGateway } from "./judge/gateway.js";
 
+// Exact-order mode (src/judge/gateway.ts): YEBO_EXACT_ORDER=on. Off by default. Anything other
+// than on, off or empty is an error, so a typo cannot quietly turn the check off.
+export function exactOrderSetting(): boolean {
+  const v = (process.env.YEBO_EXACT_ORDER ?? "").trim().toLowerCase();
+  if (v && v !== "on" && v !== "off") throw new Error(`YEBO_EXACT_ORDER must be "on" or "off", not "${v}"`);
+  return v === "on";
+}
+
 export type GatewayMode = { mode: "live" | "judge"; url: string; stop: () => Promise<void> };
 
 export async function startGateway(): Promise<GatewayMode> {

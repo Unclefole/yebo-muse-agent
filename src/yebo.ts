@@ -25,11 +25,15 @@ export type PaymentProposal = {
   memo: string;
 };
 
+// One invoice on an exact-order mission. Judge mode only: the live gateway enforces caps.
+export type OrderLine = { invoice_number: string; payee: string; account: string; amount_usd: number; currency: string };
+
 export type MissionScope = {
   per_transaction_usd: number;
   cumulative_usd: number;
   payees: string[];
   expires_at: string; // ISO date
+  order_lines?: OrderLine[];
 };
 
 export type Mission = {
@@ -94,6 +98,7 @@ export async function requestMission(goal: string, scope: MissionScope): Promise
         cumulative_budget_usd: scope.cumulative_usd,
         merchant_scope: scope.payees,
         asset_scope: [CURRENCY],
+        ...(scope.order_lines ? { order_lines: scope.order_lines } : {}),
       },
     },
     ttl_ms: Math.min(Math.max(Number.isFinite(ttl) ? ttl : TTL_MIN_MS, TTL_MIN_MS), TTL_MAX_MS),
@@ -142,7 +147,8 @@ function denialReason(status: number, data: any): string {
   return (data?.error ?? `gateway returned ${status}`) as string;
 }
 
-export async function checkPayment(missionToken: string, proposal: PaymentProposal): Promise<{
+// line: exact-order mode, the approved invoice this payment claims to pay.
+export async function checkPayment(missionToken: string, proposal: PaymentProposal, line?: OrderLine): Promise<{
   status: number; decision: Decision; outcome: string; reason?: string; receipt?: string; raw: any; unknown?: true;
 }> {
   if (!missionToken) {
@@ -152,7 +158,10 @@ export async function checkPayment(missionToken: string, proposal: PaymentPropos
   try {
     reply = await call("POST", "/execute", {
       token: missionToken,
-      action: { capability: PAYMENT_CAPABILITY, amount: proposal.amount_usd, merchant: proposal.payee, asset: CURRENCY },
+      action: {
+        capability: PAYMENT_CAPABILITY, amount: proposal.amount_usd, merchant: proposal.payee, asset: CURRENCY,
+        ...(line ? { invoice_number: line.invoice_number, account: line.account } : {}),
+      },
     });
   } catch (err) {
     // The answer was lost (connection dropped or timed out). Yebo may still have allowed the

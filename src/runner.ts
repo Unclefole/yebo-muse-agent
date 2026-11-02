@@ -17,12 +17,12 @@
 // allows to a vendor with a 24-hour limit are recorded in the vendor ledger (src/ledger.ts).
 
 import { chat, endpoint, shortName, type Brain, type Message, type Tool } from "./muse.js";
-import { checkPayment, requestMission, waitForApproval, DRY_RUN_OUTCOME, UNKNOWN_OUTCOME, type Decision, type PaymentProposal } from "./yebo.js";
+import { checkPayment, requestMission, waitForApproval, DRY_RUN_OUTCOME, UNKNOWN_OUTCOME, type Decision, type OrderLine, type PaymentProposal } from "./yebo.js";
 import { extractInvoiceSource, readerFor, type Invoice, type InvoiceSource } from "./invoice.js";
 import { findHiddenRequests, type HiddenRequest } from "./injection.js";
 import { accountEndings, capRefusal, checkInvoices, loadVendors, vendorFor, vendorName, vendorRefusal, type Rejection, type Vendor } from "./vendors.js";
 import { DAY_MS, fileLedger, type Ledger } from "./ledger.js";
-import type { GatewayMode } from "./gatewayMode.js";
+import { exactOrderSetting, type GatewayMode } from "./gatewayMode.js";
 import { parseStrict } from "./json.js";
 
 const MISSION_TTL_MS = 15 * 60_000;
@@ -65,7 +65,8 @@ export type RunEvent =
   | { type: "allowances"; allowances: { vendor: string; max_24h_usd: number; used_usd: number }[] }
   // chosen invoices left out of the limits: duplicates, or not matching the vendor file
   | { type: "invoices_refused"; rejected: Rejection[] }
-  | { type: "mission"; requestId: string; authorizeUrl: string; limits: MissionLimits; source: "invoices" | "proposals"; expiresAt: string; requiredApprovals: number }
+  // lines: exact-order mode, the invoice list the human approves
+  | { type: "mission"; requestId: string; authorizeUrl: string; limits: MissionLimits; source: "invoices" | "proposals"; expiresAt: string; requiredApprovals: number; lines?: OrderLine[] }
   | { type: "no_mission"; reason: string }
   | { type: "mission_result"; approved: boolean }
   | ({ type: "decision" } & DecisionResult)
@@ -270,14 +271,32 @@ async function readInvoices(sources: InvoiceSource[], needAccount: boolean, brai
   return invoices;
 }
 
+// Exact-order mode: the invoice list, built here in code from invoices that passed every
+// check. The model's plan only selects invoices; it cannot add a line or change one. An
+// invoice that cannot be listed exactly (no number, or not exactly one account) is refused.
+export function orderLines(invoices: Invoice[], vendors: Vendor[] | null): { lines: Map<Invoice, OrderLine>; rejected: Rejection[] } {
+  const lines = new Map<Invoice, OrderLine>();
+  const rejected: Rejection[] = [];
+  for (const i of invoices) {
+    if (i.currency !== "USD") continue; // not in the limits either
+    const accounts = [...new Set(accountEndings(i.payment_details))];
+    const refuse = (control: Rejection["control"], reason: string) => rejected.push({ file: i.file, payee: i.payee, amount: i.amount, control, reason: `exact-order mode: ${reason}` });
+    if (!i.invoice_number) refuse("reference", "the invoice has no number");
+    else if (accounts.length !== 1) refuse("account", `the invoice must show exactly one account, not ${accounts.length}`);
+    else lines.set(i, { invoice_number: i.invoice_number, payee: onFile(i.payee, vendors) ?? i.payee, account: accounts[0], amount_usd: i.amount, currency: i.currency });
+  }
+  return { lines, rejected };
+}
+
 // Asks for one mission with these limits, then waits for a human to approve it. Returns
 // the mission token, or "" if it was not approved.
-async function approveMission(goal: string, limits: MissionLimits, source: "invoices" | "proposals", emit: Emit): Promise<string> {
+async function approveMission(goal: string, limits: MissionLimits, source: "invoices" | "proposals", emit: Emit, lines?: OrderLine[]): Promise<string> {
   const mission = await requestMission(goal, {
     per_transaction_usd: limits.per_payment_usd,
     cumulative_usd: limits.total_usd,
     payees: limits.payees,
     expires_at: new Date(Date.now() + MISSION_TTL_MS).toISOString(),
+    ...(lines ? { order_lines: lines } : {}),
   });
   emit({
     type: "mission",
@@ -287,6 +306,7 @@ async function approveMission(goal: string, limits: MissionLimits, source: "invo
     source,
     expiresAt: mission.expiresAt,
     requiredApprovals: mission.requiredApprovals,
+    ...(lines ? { lines } : {}),
   });
   const token = await waitForApproval(mission);
   emit({ type: "mission_result", approved: !!token });
@@ -297,12 +317,18 @@ async function approveMission(goal: string, limits: MissionLimits, source: "invo
 // spend here instead of the vendor ledger file (the Controls Lab gives each run its own).
 // reloadVendors: how to read the vendor file again after approval (default: YEBO_VENDORS
 // again when vendors is not given; none when it is).
-export type RunInput = { goal: string; sources: InvoiceSource[]; agentMode?: AgentMode; brain?: Brain; vendors?: Vendor[] | null; ledger?: Ledger; reloadVendors?: () => Vendor[] | null };
+// exactOrder: approve and pay an exact invoice list (default: YEBO_EXACT_ORDER). Judge mode only.
+export type RunInput = { goal: string; sources: InvoiceSource[]; agentMode?: AgentMode; brain?: Brain; vendors?: Vendor[] | null; ledger?: Ledger; reloadVendors?: () => Vendor[] | null; exactOrder?: boolean };
 
 export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit): Promise<DecisionResult[]> {
   const results: DecisionResult[] = [];
   const agentMode: AgentMode = input.agentMode ?? "guarded";
   try {
+    const exactOrder = input.exactOrder ?? exactOrderSetting();
+    // Refused up front: the live gateway enforces caps, so asking it for an invoice list
+    // would promise a check that does not run.
+    if (exactOrder && gateway.mode !== "judge") throw new Error("exact-order mode runs only in judge mode: the live Yebo gateway enforces caps today");
+    if (exactOrder && process.env.YEBO_MISSION_TOKEN) throw new Error("exact-order mode needs a new approval of the invoice list: unset YEBO_MISSION_TOKEN");
     const date = today();
     const vendors = input.vendors !== undefined ? input.vendors : loadVendors();
     // Only vendors with a 24-hour limit need the ledger; without one it is never touched.
@@ -406,6 +432,7 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
     // over a vendor's cap, anything matching no approved invoice) goes after them, when
     // the budget left is zero, and Yebo denies it.
     const unpaid: Invoice[] = [];
+    const approvedLines = new Map<Invoice, OrderLine>(); // exact-order mode
     // A reused mission (YEBO_MISSION_TOKEN) is not approved again, but the invoice checks
     // still run: its payments go in invoice order, and with invoices, a proposal that pays
     // no invoice that passed the checks is not sent (it needs a new approval).
@@ -420,14 +447,20 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
         const checked = checkInvoices(selectedInvoices(invoices, proposals), vendors, last24h);
         if (checked.rejected.length) emit({ type: "invoices_refused", rejected: checked.rejected });
         chosen = checked.passed;
-        unpaid.push(...checked.passed);
+        if (exactOrder) {
+          const listed = orderLines(chosen, vendors);
+          if (listed.rejected.length) emit({ type: "invoices_refused", rejected: listed.rejected });
+          chosen = chosen.filter((i) => listed.lines.has(i));
+          for (const [invoice, line] of listed.lines) approvedLines.set(invoice, line);
+        }
+        unpaid.push(...chosen);
       }
       if (!reused) {
         const limits = invoices.length
           ? limitsFromInvoices(chosen.map((i) => ({ ...i, payee: onFile(i.payee, vendors) ?? i.payee })))
-          : planLimits(proposals, vendors, last24h);
-        if (limits) missionToken = await approveMission(input.goal, limits, invoices.length ? "invoices" : "proposals", emit);
-        else emit({ type: "no_mission", reason: invoices.length ? "the plan matches none of the invoices that can be paid in USD and pass the checks" : "the plan names no payee on the vendor file" });
+          : exactOrder ? null : planLimits(proposals, vendors, last24h);
+        if (limits) missionToken = await approveMission(input.goal, limits, invoices.length ? "invoices" : "proposals", emit, exactOrder ? [...approvedLines.values()] : undefined);
+        else emit({ type: "no_mission", reason: invoices.length ? "the plan matches none of the invoices that can be paid in USD and pass the checks" : exactOrder ? "exact-order mode pays invoices only, and this run has none" : "the plan names no payee on the vendor file" });
       }
     }
     // What goes to Yebo: the vendor file's name for the payee, when it has one.
@@ -465,11 +498,20 @@ export async function runAgent(input: RunInput, gateway: GatewayMode, emit: Emit
     // be, so they are not sent.
     const notCovered = (reused && invoices.length > 0) || stale.size > 0;
     const notSent = (reason: string) => ({ decision: "REQUIRE_APPROVAL" as Decision, outcome: "needs a new approval", reason: `${reason} (not sent to Yebo)`, receipt: undefined });
+    // Exact-order mode: which approved line a proposal claims, so Yebo can say why it is
+    // refused. A claim grants nothing: the gateway compares every field with the approved line.
+    const claimedLine = (p: PaymentProposal, invoice?: Invoice): OrderLine | undefined => {
+      if (invoice) return approvedLines.get(invoice);
+      const payee = onFile(p.payee, vendors) ?? p.payee;
+      const approved = [...approvedLines.entries()].filter(([, l]) => l.payee === payee);
+      const named = invoiceRef(p.memo, invoices);
+      return (named ? approved.find(([, l]) => l.invoice_number === named) : approved.find(([i]) => sameAs(p, i)))?.[1];
+    };
     const check = async (proposal: PaymentProposal, invoice?: Invoice) => {
       const held = invoice && stale.get(invoice);
       if (held) return notSent(held);
       if (notCovered && !invoice) return notSent(reused ? "pays no invoice that passed the checks, so the reused mission does not cover it" : "pays no invoice that is still approved");
-      return checkPayment(missionToken, toYebo(proposal));
+      return checkPayment(missionToken, toYebo(proposal), exactOrder ? claimedLine(proposal, invoice) : undefined);
     };
 
     // 4. Every proposal is checked by Yebo: first the agent's proposals that pay an approved

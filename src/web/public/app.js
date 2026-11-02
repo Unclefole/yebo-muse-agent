@@ -46,6 +46,7 @@ async function init() {
       : cfg.mode === "judge"
       ? "Judge mode: payments are checked by a local stand-in for the Yebo gateway that enforces the same mission rules. Approval is simulated; the live flow uses your passkey at yebo.dev. Dry run: no money moves."
       : `Live mode: payments are checked by the Yebo gateway (${cfg.gateway}). You approve the limits with your passkey. Dry run: no money moves.`;
+    if (cfg.exactOrder) $("foot").textContent += ` ${cfg.exactOrder}`;
     const listed = await (await fetch("/api/samples")).json();
     state.sampleNames = listed.samples || [];
     state.demoSetNames = listed.demoSet || [];
@@ -515,6 +516,13 @@ function showMission(e) {
   $("m-source").textContent = e.source === "invoices"
     ? `Built from the invoices the agent chose to pay, never wider than the invoices themselves.${state.vendorCheck ? " Payees and bank accounts must also be on the vendor file." : ""} Anything else is refused.`
     : "Built from the agent's plan (no invoices in this run).";
+  // Exact-order mode: the invoice list that is approved, one row per invoice.
+  const lines = $("m-lines");
+  lines.hidden = !e.lines;
+  lines.textContent = "";
+  for (const l of e.lines || []) lines.append(el("li", "", `${l.invoice_number}: ${l.payee}, account ending ${l.account}, ${usd(l.amount_usd)} ${l.currency}`));
+  $("m-exact").hidden = !e.lines;
+  $("m-exact").textContent = e.lines ? state.cfg.exactOrder || "" : "";
   $("m-expires").textContent = new Date(e.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const link = $("approve-link");
   // A replay or the hosted demo has no approval page to open: approval was simulated.
