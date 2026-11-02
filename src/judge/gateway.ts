@@ -15,6 +15,9 @@
 //   - each payment must be in an approved, unexpired mission, for an allowed capability,
 //     to a listed payee, in a listed currency, within the per-payment limit and within
 //     what is left of the total budget
+//   - exact-order mode (optional, per mission): a mission that carries an invoice list pays
+//     only those invoices, each line once and for its exact amount; the rules above must
+//     pass as well. A mission without a list stays a cap, as on the live gateway today.
 // Approval is simulated on a local web page (no passkey) and every payment is a dry run.
 
 import { createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
@@ -23,12 +26,16 @@ import type { AddressInfo } from "node:net";
 import { approvalPage, resultPage } from "./pages.js";
 import { DuplicateKeyError, parseStrict } from "../json.js";
 
+// One approved invoice in exact-order mode. Built by trusted code, shown to the human.
+export type OrderLine = { invoice_number: string; payee: string; account: string; amount_usd: number; currency: string };
+
 export type Limits = {
   capabilities: string[];
   per_transaction_limit_usd: number;
   cumulative_budget_usd: number;
   merchant_scope: string[];
   asset_scope: string[];
+  order_lines?: OrderLine[]; // present: exact-order mode
 };
 
 export type JudgeMission = {
@@ -39,6 +46,7 @@ export type JudgeMission = {
   status: "pending" | "approved" | "denied" | "expired" | "revoked";
   expires_at: number;
   spent_usd: number;
+  paid_lines: Set<string>; // exact-order mode: the lines already paid
   approval_nonce: string; // must come back with the approve/deny form, so other sites cannot submit it
   token?: string;
 };
@@ -58,10 +66,43 @@ const TTL_DEFAULT_MS = 10 * 60_000;
 const MAX_BODY_BYTES = 64 * 1024;
 const EXECUTE_FIELDS = new Set(["token", "action"]);
 const ACTION_FIELDS = new Set(["capability", "amount", "merchant", "asset"]);
+const EXACT_ACTION_FIELDS = new Set([...ACTION_FIELDS, "invoice_number", "account"]);
+const LINE_FIELDS = ["invoice_number", "payee", "account", "amount_usd", "currency"];
 
 const isPayment = (capability: string) => /^payment(\.|$)/i.test(capability);
 const strings = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === "string" && x.length > 0);
 const money = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+
+const lineKey = (payee: string, invoiceNumber: string) => JSON.stringify([payee, invoiceNumber]);
+
+// Why an invoice list cannot be enforced under these limits. A list that is present but
+// unusable is refused, never treated as "no list", so a mission cannot fall back to a cap.
+function orderLineErrors(lines: unknown, perTx: number, total: number, merchants: string[], assets: string[]): string[] {
+  if (!Array.isArray(lines) || lines.length === 0) return ["order_lines must be a non-empty list"];
+  const errors: string[] = [];
+  const seen = new Set<string>();
+  let sum = 0;
+  lines.forEach((raw, i) => {
+    const l = raw as Partial<OrderLine> | null;
+    const at = `order_lines[${i}]`;
+    if (!l || typeof l !== "object" || Object.keys(l).some((k) => !LINE_FIELDS.includes(k))) return errors.push(`${at} must have only ${LINE_FIELDS.join(", ")}`);
+    const { invoice_number: number, payee, account, amount_usd: amount, currency } = l;
+    if (typeof number !== "string" || !number.trim()) errors.push(`${at} needs an invoice_number`);
+    if (typeof payee !== "string" || !merchants.includes(payee)) errors.push(`${at} payee must be in merchant_scope`);
+    if (typeof account !== "string" || !/^\d{4}$/.test(account)) errors.push(`${at} account must be the last 4 digits`);
+    if (!money(amount) || amount === 0 || Math.round(amount * 100) / 100 !== amount) errors.push(`${at} amount_usd must be above zero, in whole cents`);
+    else {
+      sum += amount;
+      if (amount > perTx) errors.push(`${at} amount_usd exceeds per_transaction_limit_usd`);
+    }
+    if (typeof currency !== "string" || !assets.includes(currency)) errors.push(`${at} currency must be in asset_scope`);
+    const key = lineKey(String(payee), String(number));
+    if (seen.has(key)) errors.push(`${at} repeats invoice ${String(number)} for ${String(payee)}`);
+    seen.add(key);
+  });
+  if (sum > total + 1e-9) errors.push("order_lines add up to more than cumulative_budget_usd");
+  return errors;
+}
 
 // Returns the limits, or the reasons they are not enforceable.
 export function validateLimits(scope: unknown): { ok: true; limits: Limits } | { ok: false; errors: string[] } {
@@ -82,6 +123,8 @@ export function validateLimits(scope: unknown): { ok: true; limits: Limits } | {
     if (!strings(assets) || assets.length === 0) errors.push("payments need a non-empty asset_scope (currencies)");
     if (!(money(perTx) && perTx > 0) || !(money(total) && total > 0)) errors.push("payments need limits above zero");
   }
+  const hasList = en.order_lines !== undefined;
+  if (hasList && !errors.length) errors.push(...orderLineErrors(en.order_lines, perTx as number, total as number, merchants as string[], assets as string[]));
   if (errors.length) return { ok: false, errors };
   return {
     ok: true,
@@ -91,8 +134,24 @@ export function validateLimits(scope: unknown): { ok: true; limits: Limits } | {
       cumulative_budget_usd: total as number,
       merchant_scope: merchants as string[],
       asset_scope: assets as string[],
+      ...(hasList ? { order_lines: en.order_lines as OrderLine[] } : {}),
     },
   };
+}
+
+// Exact-order mode: why this payment is not one approved invoice line, or null if it is. The
+// cap rules in paymentRefusal still apply afterwards: both must pass.
+export function orderRefusal(m: JudgeMission, action: Record<string, unknown>): { status: number; error: string; reason: string } | null {
+  const { invoice_number: number, merchant, account, asset, amount } = action;
+  const notApproved = (why: string) => ({ status: 403, error: "NOT_APPROVED_INVOICE", reason: `not an approved invoice: ${why}` });
+  if (typeof number !== "string" || !number) return notApproved("the payment names no invoice");
+  const line = m.limits.order_lines?.find((l) => l.invoice_number === number && l.payee === merchant);
+  if (!line) return notApproved(`${String(merchant ?? "")} has no approved invoice ${number}`);
+  if (account !== line.account) return notApproved(`account '${String(account ?? "")}' does not match invoice ${number}`);
+  if (asset !== line.currency) return notApproved(`currency '${String(asset ?? "")}' does not match invoice ${number}`);
+  if (m.paid_lines.has(lineKey(line.payee, line.invoice_number))) return { status: 409, error: "INVOICE_ALREADY_PAID", reason: `invoice already paid: ${number}` };
+  if (amount !== line.amount_usd) return { status: 403, error: "AMOUNT_MISMATCH", reason: `amount does not match invoice: ${number} is ${line.amount_usd}, not ${String(amount)}` };
+  return null;
 }
 
 // Why one payment is not allowed under these limits, or null if it is.
@@ -122,7 +181,7 @@ export function paymentRefusal(m: JudgeMission, action: Record<string, unknown>)
 }
 
 // One allowed payment (a dry run), for tests that count what was allowed.
-export type JudgeExecution = { mission_id: string; merchant: string; amount: number; asset: string; receipt_id: string };
+export type JudgeExecution = { mission_id: string; merchant: string; amount: number; asset: string; receipt_id: string; invoice_number?: string };
 
 export class JudgeGateway {
   readonly missions = new Map<string, JudgeMission>();
@@ -276,6 +335,7 @@ export class JudgeGateway {
       status: "pending",
       expires_at: this.now() + ttl,
       spent_usd: 0,
+      paid_lines: new Set(),
       approval_nonce: randomBytes(16).toString("hex"),
     };
     this.missions.set(m.id, m);
@@ -296,8 +356,9 @@ export class JudgeGateway {
     }
     // Only the fields the gateway enforces. Anything else (recurring, a fee, an order or
     // idempotency key, a note) would look like a promise the gateway does not keep.
-    const extra = [...Object.keys(body).filter((k) => !EXECUTE_FIELDS.has(k)), ...Object.keys(action).filter((k) => !ACTION_FIELDS.has(k)).map((k) => `action.${k}`)];
-    if (extra.length) return send(res, 400, { error: "UNKNOWN_FIELD", message: `not supported: ${extra.join(", ")}` });
+    const unknownFields = (allowed: Set<string>) => [...Object.keys(body).filter((k) => !EXECUTE_FIELDS.has(k)), ...Object.keys(action).filter((k) => !allowed.has(k)).map((k) => `action.${k}`)];
+    const refuseExtra = (extra: string[]) => send(res, 400, { error: "UNKNOWN_FIELD", message: `not supported: ${extra.join(", ")}` });
+    if (unknownFields(EXACT_ACTION_FIELDS).length) return refuseExtra(unknownFields(EXACT_ACTION_FIELDS));
     const missionId = this.tokenMission(body.token);
     if (!missionId) return send(res, 401, { error: "TOKEN_INVALID" });
     const m = this.mission(missionId);
@@ -305,14 +366,21 @@ export class JudgeGateway {
     if (m.status === "expired") return send(res, 401, { error: "TOKEN_EXPIRED" });
     if (m.status !== "approved" || m.token !== body.token) return send(res, 403, { error: "TOKEN_NOT_ACTIVE", status: m.status });
 
-    const refusal = paymentRefusal(m, action as Record<string, unknown>);
+    // The invoice fields mean something only on a mission with an invoice list.
+    const exact = !!m.limits.order_lines;
+    if (!exact && unknownFields(ACTION_FIELDS).length) return refuseExtra(unknownFields(ACTION_FIELDS));
+
+    // Both must pass. No await between these checks and recording the payment, so two copies
+    // sent at the same instant cannot both pay one line.
+    const refusal = (exact ? orderRefusal(m, action as Record<string, unknown>) : null) ?? paymentRefusal(m, action as Record<string, unknown>);
     if (refusal) return send(res, refusal.status, { error: refusal.error, reason: refusal.reason });
 
     const amount = (action as { amount: number }).amount;
     m.spent_usd = Math.round((m.spent_usd + amount) * 100) / 100;
     const receiptId = `rcpt_${randomUUID()}`;
-    const { merchant, asset } = action as { merchant: string; asset: string };
-    this.executions.push({ mission_id: m.id, merchant, amount, asset, receipt_id: receiptId });
+    const { merchant, asset, invoice_number: invoiceNumber } = action as { merchant: string; asset: string; invoice_number?: string };
+    if (exact) m.paid_lines.add(lineKey(merchant, invoiceNumber!));
+    this.executions.push({ mission_id: m.id, merchant, amount, asset, receipt_id: receiptId, ...(exact ? { invoice_number: invoiceNumber } : {}) });
     send(res, 200, {
       ok: true,
       decision: "allow",

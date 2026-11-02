@@ -331,3 +331,10 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 ## 2026-10-30 (hosted replay demo redeployed)
 
 - Redeployed the hosted replay demo from a clean `git archive` of `main` at `9f2e5f8` (Add MIT license) with `railway up`. Checked afterwards: the page loads, `/api/config` reports replay mode with dry run on and live runs, uploads and voice off, all 3 replays are listed, and a run request is refused with 403. The only variable is still `YEBO_SITE=replay`, with no keys.
+
+## 2026-11-02 (exact-order mode, judge mode only, branch `exact-order`, not merged)
+
+- Exact-order mode: enforced by the judge-mode stand-in in this repo. The live Yebo gateway enforces caps today; exact-order is planned there. `YEBO_EXACT_ORDER=on`; off by default.
+- The agent's code builds an invoice list from invoices that passed the checks; the judge gateway pays a line only on an exact match, once, and the old cap checks still run. The approval page shows the list.
+- The Nov 1 $450 and two-$100 attacks and tests #7 and #11 are now denied direct to the judge gateway in this mode. 186 tests pass (143 existing, 43 new).
+- Real Muse Spark, demo set, 5 runs each with the mode off and on, plus 4 on unchanged `main`: always 5 ALLOW. DENY was 1 or 2 depending on whether Muse proposed the second Nimbus copy, on `main` too.
