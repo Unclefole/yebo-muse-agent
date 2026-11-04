@@ -2,7 +2,7 @@
 
 > **Replay mode is deployed (Oct 29, 2026):** https://yebo-muse-demo-production.up.railway.app
 > Railway project `yebo-muse-demo`, separate from Yebo's. One variable: `YEBO_SITE=replay`. No API keys. Live mode is **not** deployed and needs Francis's approval.
-> Deployed from a clean `git archive` of `main` with `railway up`. `railway.json` and `.nvmrc` pin the build (`npm ci --include=dev`, `npm start`, Node 22).
+> Deployed from a clean `git archive` of `main` with `railway up`; last redeployed Nov 4, 2026 from `2973694`. `railway.json` and `.nvmrc` pin the build (`npm ci --include=dev`, `npm start`, Node 22).
 
 The goal is one link judges can open without cloning the repo or bringing a key, kept up until **Nov 16, 2026**, and then switched off.
 
