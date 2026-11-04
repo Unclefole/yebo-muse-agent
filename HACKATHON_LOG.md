@@ -338,3 +338,7 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 - The agent's code builds an invoice list from invoices that passed the checks; the judge gateway pays a line only on an exact match, once, and the old cap checks still run. The approval page shows the list.
 - The Nov 1 $450 and two-$100 attacks and tests #7 and #11 are now denied direct to the judge gateway in this mode. 186 tests pass (143 existing, 43 new).
 - Real Muse Spark, demo set, 5 runs each with the mode off and on, plus 4 on unchanged `main`: always 5 ALLOW. DENY was 1 or 2 depending on whether Muse proposed the second Nimbus copy, on `main` too.
+
+## 2026-11-04 (benchmark: Muse alone vs Muse + Yebo, branch `benchmark`, not merged)
+
+- 40 synthetic invoices (25 clean, 15 attacks), judge mode, exact-order on, Muse Spark 1.3, 3 repeats, dry run: `docs/BENCHMARK.md`. Muse alone: 5 to 6 of 15 attacks stopped, $7,825 to $9,700 of bad payments. Muse + Yebo: 15 of 15, $0. Both paid all 25 clean invoices, same cost and time per invoice.

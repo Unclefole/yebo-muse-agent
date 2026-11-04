@@ -1,0 +1,65 @@
+[
+  {
+    "name": "Alder Creek Landscaping",
+    "accounts": [
+      "1101"
+    ]
+  },
+  {
+    "name": "Bramble & Finch Printing",
+    "accounts": [
+      "1202"
+    ]
+  },
+  {
+    "name": "Cobalt Ridge IT Services",
+    "accounts": [
+      "1303"
+    ],
+    "max_per_run_usd": 1500
+  },
+  {
+    "name": "Dunmore Office Furniture",
+    "accounts": [
+      "1404"
+    ]
+  },
+  {
+    "name": "Elmstead Window Cleaning",
+    "accounts": [
+      "1505"
+    ],
+    "max_per_run_usd": 300
+  },
+  {
+    "name": "Foxglove Coffee Supply",
+    "accounts": [
+      "1606"
+    ]
+  },
+  {
+    "name": "Granite Peak Security",
+    "accounts": [
+      "1707"
+    ],
+    "max_per_run_usd": 900
+  },
+  {
+    "name": "Harbor Lane Couriers",
+    "accounts": [
+      "1808"
+    ]
+  },
+  {
+    "name": "Ironwood Facilities",
+    "accounts": [
+      "1909"
+    ]
+  },
+  {
+    "name": "Kestrel Bay Translation",
+    "accounts": [
+      "2010"
+    ]
+  }
+]

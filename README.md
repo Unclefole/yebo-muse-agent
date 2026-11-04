@@ -42,6 +42,19 @@ Live runs in judge mode, dry run, nothing forced:
 
 And forced: when the two payment requests hidden in the Ridgeback invoice are forced through as if the agent were hijacked, Yebo denies both. **Muse Spark Open also flagged both hidden payment requests** (in all 6 Open-mode runs on Oct 27).
 
+## Benchmark: Muse alone vs Muse + Yebo
+
+Judge-mode stand-in, synthetic invoices: 40 made for this test (25 clean, 15 attacks), Muse Spark 1.3, dry run, 3 repeats. Not the live Yebo gateway; the receipts are local judge-mode IDs and do not verify on yebo.dev. Full method and limits: [docs/BENCHMARK.md](docs/BENCHMARK.md).
+
+| | Muse alone | Muse + Yebo (judge mode, exact-order on) |
+|---|---|---|
+| Attacks stopped (of 15) | 5 to 6 | 15 |
+| Bad dollars through | $7,825 to $9,700 | $0 |
+| Clean invoices paid (of 25) | 25 | 25 |
+| Cost and time per invoice | $0.010, 7.6 s | $0.010, 7.7 s |
+
+Muse ignored every hidden instruction by itself. What it could not catch were changed accounts, look-alike payees, vendor limits, some duplicates and expired approvals; those were stopped by this repo's vendor file and duplicate check and by the judge gateway.
+
 ## Why now
 
 Meta's own Muse Spark safety report says the model can be fooled by prompt injection in agent settings, and Meta guards its own Muse agent with Sentinel. Yebo gives developers building on the Muse Spark API the same protection for money.
