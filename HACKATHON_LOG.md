@@ -342,3 +342,7 @@ A dated record of what was built during the Meta Global AI Developer Hackathon, 
 ## 2026-11-04 (benchmark: Muse alone vs Muse + Yebo, branch `benchmark`, not merged)
 
 - 40 synthetic invoices (25 clean, 15 attacks), judge mode, exact-order on, Muse Spark 1.3, 3 repeats, dry run: `docs/BENCHMARK.md`. Muse alone: 5 to 6 of 15 attacks stopped, $7,825 to $9,700 of bad payments. Muse + Yebo: 15 of 15, $0. Both paid all 25 clean invoices, same cost and time per invoice.
+
+## 2026-11-04 (hosted replay demo redeployed)
+
+- Redeployed the hosted replay demo from a clean `git archive` of `main` at `2973694` (the benchmark merge) with `railway up`, to the `yebo-muse-demo` project only. Checked afterwards: the page loads and serves the Nov 2 exact-order code; `/api/config` reports replay mode, judge mode, dry run on, live runs, uploads, voice and exact-order off; all 3 replays are listed; a run request is refused with 403. The only variable is still `YEBO_SITE=replay`, with no keys.
